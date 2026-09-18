@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Element Evolution",
+    "slug": "element-evolution",
+    "version": "0.2.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#f6f1e4",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yourname.elementevolution"
+    },
+    "android": {
+      "package": "com.yourname.elementevolution",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "adaptiveIcon": {
+        "backgroundColor": "#f6f1e4"
+      }
+    },
+    "web": {}
+  }
+}

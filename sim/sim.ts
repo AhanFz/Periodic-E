@@ -1,0 +1,493 @@
+import { Game } from '../src/game/engine';
+import { ELEMENT_ORDER, ENEMIES } from '../src/game/constants';
+import { gridSizeFor } from '../src/game/grid';
+import type { Direction, ElementKey, Enemy, EnemyType, HutItem, Pos } from '../src/game/types';
+
+const DIRS: Array<[number, number, Direction]> = [[0, -1, 'up'], [0, 1, 'down'], [-1, 0, 'left'], [1, 0, 'right']];
+const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
+const same = (a: Pos, b: Pos) => a.x === b.x && a.y === b.y;
+const adjacent = (a: Pos, b: Pos) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1;
+
+// =====================================================================
+// Invariants
+// =====================================================================
+
+function assertInvariants(g: Game) {
+  if (g.elementHealth > g.maxHealth) throw new Error('health overflow');
+  if (g.photons < 0 || g.photons > 5) throw new Error('photon bounds ' + g.photons);
+  if (g.dopantTraps.length > 2) throw new Error('trap cap');
+  if (g.encasedCount > 2) throw new Error('encase cap');
+  if (g.enemies.length > 6) throw new Error('enemy cap ' + g.enemies.length);
+  if (!g.isPassable(g.playerPos.x, g.playerPos.y)) throw new Error('player on impassable tile ' + JSON.stringify(g.playerPos));
+  if (g.enemyAt(g.playerPos.x, g.playerPos.y)) throw new Error('enemy sharing the player tile');
+  if (g.heldSpear !== null && g.heldSpear <= 0) throw new Error('held spear with no durability');
+  if (g.polarity.active && !g.polarity.direction) throw new Error('polarity active without a direction');
+  if (g.polarity.active && (g.polarity.countdown < 1 || g.polarity.countdown > 4)) throw new Error('polarity countdown out of range ' + g.polarity.countdown);
+  if (g.groundedSpear && g.groundedSpear.health <= 0) throw new Error('grounded spear with no durability');
+  for (const e of g.enemies) {
+    for (const t of g.enemyTiles(e)) if (!g.isPassable(t.x, t.y)) throw new Error('enemy on impassable ' + e.type + JSON.stringify(t));
+    if (e.health <= 0) throw new Error('dead enemy alive');
+    if (e.bonded && (e.x2 === null || e.y2 === null)) throw new Error('bonded without second tile');
+    if (e.bonded && Math.abs(e.x - e.x2!) + Math.abs(e.y - e.y2!) !== 1) throw new Error('molecule not adjacent');
+    if (e.tetherTurnsLeft > 0 && !g.enemyTiles(e).some(t => adjacent(t, g.playerPos))) throw new Error('tethered enemy not adjacent to player');
+    if (e.tetherTurnsLeft > 0 && (e.armed || e.telegraph)) throw new Error('tethered enemy has an active special');
+  }
+  const occ = new Set<string>();
+  for (const e of g.enemies) for (const t of g.enemyTiles(e)) { const k = `${t.x},${t.y}`; if (occ.has(k)) throw new Error('enemy overlap at ' + k); occ.add(k); }
+}
+
+// =====================================================================
+// Deterministic scenarios: the spec's worked examples
+// =====================================================================
+
+function mkEnemy(g: Game, type: EnemyType, x: number, y: number): Enemy {
+  const e: Enemy = {
+    id: g.nextEnemyId++, type, x, y, x2: null, y2: null, bonded: false, bondHalves: null, bondingWith: null,
+    health: ENEMIES[type].health, maxHealth: ENEMIES[type].health, frozenTurnsLeft: 0, paralyzed: false, encasedTurnsLeft: 0,
+    telegraph: false, telegraphTiles: [], poisonCooldown: 1, poisonShape: 0, armed: false, explodeTiles: [], fleeTurnsLeft: 0,
+    invisibleTurnsLeft: 0, vaporCooldown: 2, lastKnown: null, plannedDx: 0, plannedDy: 0, tetherTurnsLeft: 0, suppressedTurns: 0,
+  };
+  g.enemies.push(e);
+  return e;
+}
+/** A fresh 5x5 plain grid with nothing on it; player at the left edge of the middle row. */
+function blank(element: ElementKey): Game {
+  const g = new Game(element);
+  g.enemies = []; g.photonTiles = []; g.dopantTraps = []; g.scorchedTiles = [];
+  g.layout.hut = { x: 4, y: 4 }; g.layout.hatch = { x: 4, y: 0 };
+  g.playerPos = { x: 0, y: 2 };
+  return g;
+}
+function expect(cond: boolean, msg: string) { if (!cond) throw new Error('scenario failed: ' + msg); }
+
+function runScenarios() {
+  // Spear vs one Iodine (4 HP): 3 damage, survives at 1; spear flies on with 2 durability and lands at range 4.
+  {
+    const g = blank('carbon');
+    const io = mkEnemy(g, 'iodine', 2, 2);
+    g.heldSpear = 4;
+    g.beginThrow(); g.previewAim('right'); g.confirmAim();
+    expect(io.health === 1, 'iodine left at 1, got ' + io.health);
+    expect(!!g.groundedSpear && g.groundedSpear.health === 2 && g.groundedSpear.x === 4, 'spear landed at x=4 with 2 durability: ' + JSON.stringify(g.groundedSpear));
+    expect(g.usedAbilityThisTurn && !g.movedThisTurn, 'throw spent only the ability slot');
+  }
+  // Spear vs two Bromines (3 HP each): both die, 2 + 2 durability spent, spear destroyed.
+  {
+    const g = blank('carbon');
+    mkEnemy(g, 'bromine', 1, 2); mkEnemy(g, 'bromine', 2, 2);
+    g.heldSpear = 4;
+    g.beginThrow(); g.previewAim('right'); g.confirmAim();
+    expect(g.enemies.length === 0, 'both bromines dead');
+    expect(g.groundedSpear === null && g.heldSpear === null, 'spear destroyed');
+    expect(g.stageKills === 2, 'two kills credited');
+  }
+  // Ram: 2 out, 1 in, the player stays put, and an armed Fluorine is defused rather than detonating.
+  {
+    const g = blank('hydrogen');
+    const f = mkEnemy(g, 'fluorine', 1, 2); f.armed = true; f.explodeTiles = [{ x: 0, y: 2 }, { x: 1, y: 2 }];
+    const hp = g.elementHealth;
+    g.movePlayer(1, 0);
+    expect(g.playerPos.x === 0 && g.playerPos.y === 2, 'player stayed put');
+    expect(g.enemies.length === 0, 'fluorine died to one ram');
+    expect(g.elementHealth === hp - 1, 'player took exactly 1');
+    expect(g.movedThisTurn && !g.usedAbilityThisTurn, 'ram spent only the move slot');
+    expect(g.photons === 3, 'kill paid a photon');
+  }
+  // Ramming Bromine still locks abilities; two rams kill it.
+  {
+    const g = blank('lithium');
+    const br = mkEnemy(g, 'bromine', 1, 2);
+    g.movePlayer(1, 0);
+    expect(br.health === 1, 'bromine at 1 after one ram');
+    expect(g.abilityLockedTurns > 0, 'bromine ram locked abilities');
+    g.passTurn();
+    expect(g.abilityLockedTurns > 0, 'lock persists through the next turn');
+    expect(!g.movedThisTurn && !g.usedAbilityThisTurn, 'flags reset at turn start');
+  }
+  // Beryllium with any shield rams for free and the shield is not spent.
+  {
+    const g = blank('beryllium');
+    mkEnemy(g, 'chlorine', 1, 2);
+    g.activateAbility(1);
+    expect(g.shieldPoints === 2, 'shield up');
+    const hp = g.elementHealth;
+    g.movePlayer(1, 0);
+    expect(g.elementHealth === hp && g.shieldPoints === 2, 'free ram, shield intact');
+  }
+  // Frozen enemies shatter on ram for no damage.
+  {
+    const g = blank('helium');
+    const io = mkEnemy(g, 'iodine', 1, 2); io.frozenTurnsLeft = 2;
+    const hp = g.elementHealth;
+    g.movePlayer(1, 0);
+    expect(g.enemies.length === 0 && g.elementHealth === hp, 'frozen iodine shattered for free');
+  }
+  // Double Dash: 3 damage on both tiles, no self damage, stop short when the far tile is still occupied.
+  {
+    const g = blank('hydrogen'); g.photons = 3;
+    const a = mkEnemy(g, 'chlorine', 1, 2);
+    const b = mkEnemy(g, 'iodine', 2, 2); b.frozenTurnsLeft = 3;
+    const hp = g.elementHealth;
+    g.activateAbility(3); g.previewAim('right'); g.confirmAim();
+    expect(!g.enemies.includes(a), 'chlorine died to the dash');
+    expect(b.health === 1, 'iodine survived at 1, got ' + b.health);
+    expect(g.playerPos.x === 1 && g.playerPos.y === 2, 'stopped in the intermediate tile, at ' + JSON.stringify(g.playerPos));
+    expect(g.elementHealth === hp, 'hydrogen took no damage');
+    expect(g.turn === 1, 'dash spent both slots and ended the turn');
+  }
+  // Double Dash lands on the far tile when both targets die.
+  {
+    const g = blank('hydrogen'); g.photons = 3;
+    mkEnemy(g, 'chlorine', 1, 2); mkEnemy(g, 'bromine', 2, 2);
+    g.activateAbility(3); g.previewAim('right'); g.confirmAim();
+    expect(g.playerPos.x === 2, 'landed two tiles out');
+    expect(g.stageKills === 2, 'two dash kills');
+  }
+  // Hydrogen Bond: the tethered enemy trails into the vacated tile and cannot act.
+  {
+    const g = blank('hydrogen');
+    const c = mkEnemy(g, 'chlorine', 1, 2);
+    g.activateAbility(1); g.previewAim('right'); g.confirmAim();
+    expect(c.tetherTurnsLeft === 2, 'tethered for 2');
+    expect(g.photons === 1, 'tether cost 1');
+    g.movePlayer(0, -1);
+    expect(c.x === 0 && c.y === 2, 'dragged into the vacated tile, at ' + JSON.stringify({ x: c.x, y: c.y }));
+    expect(g.playerPos.x === 0 && g.playerPos.y === 1, 'player moved');
+    expect(g.turn === 1 && g.elementHealth === 3, 'turn ended and the tethered enemy did not attack');
+    expect(c.tetherTurnsLeft === 1, 'tether ticked');
+  }
+  // Tethering a molecule with no room fails and costs nothing.
+  {
+    const g = blank('hydrogen');
+    const m = mkEnemy(g, 'bromine', 1, 2); m.bonded = true; m.x2 = 1; m.y2 = 1; m.health = 6; m.maxHealth = 6;
+    mkEnemy(g, 'iodine', 0, 1);
+    g.activateAbility(1); g.previewAim('right'); g.confirmAim();
+    expect(m.tetherTurnsLeft === 0 && g.photons === 2 && !g.usedAbilityThisTurn, 'blocked molecule tether refunded');
+  }
+  // One move and one ability per turn, either order; aiming then cancelling keeps the slot.
+  {
+    const g = blank('lithium'); g.photons = 2;
+    g.activateAbility(1); g.previewAim('right'); g.cancelAim();
+    expect(!g.usedAbilityThisTurn, 'cancelled aim did not spend the slot');
+    g.activateAbility(1); g.previewAim('right'); g.confirmAim();
+    expect(g.usedAbilityThisTurn && g.turn === 0, 'ability spent, turn not over');
+    g.activateAbility(1);
+    expect(g.photons === 1, 'second ability in a turn refused');
+    g.movePlayer(0, -1);
+    expect(g.turn === 1 && !g.movedThisTurn && !g.usedAbilityThisTurn, 'move after ability ended the turn and reset flags');
+  }
+  // Trapped enemies lose their special: a Fluorine that arms as it lands on a trap is defused and never detonates.
+  {
+    const g = blank('boron');
+    g.playerPos = { x: 1, y: 2 };
+    g.dopantTraps.push({ x: 2, y: 2, turnsLeft: 3 });
+    const f = mkEnemy(g, 'fluorine', 3, 2); f.plannedDx = -1;
+    g.passTurn();
+    expect(f.x === 2 && f.paralyzed && !f.armed && f.explodeTiles.length === 0, 'trapped fluorine is paralyzed and defused: ' + JSON.stringify({ x: f.x, paralyzed: f.paralyzed, armed: f.armed }));
+    const hp = g.elementHealth;
+    g.passTurn();
+    expect(g.enemies.includes(f) && g.elementHealth === hp, 'defused fluorine did not detonate');
+  }
+  // A Bromine that takes a trap has its contact lock suppressed for a turn.
+  {
+    const g = blank('boron');
+    g.playerPos = { x: 1, y: 2 };
+    g.dopantTraps.push({ x: 2, y: 2, turnsLeft: 3 });
+    const br = mkEnemy(g, 'bromine', 3, 2); br.plannedDx = -1;
+    g.passTurn();
+    expect(br.x === 2 && br.health === 2 && !br.paralyzed && br.suppressedTurns === 1, 'bromine took the trap: ' + JSON.stringify({ x: br.x, hp: br.health, s: br.suppressedTurns }));
+    g.movePlayer(1, 0);
+    expect(g.abilityLockedTurns === 0, 'ramming a suppressed bromine does not lock abilities');
+  }
+  // Carbon takes no damage from its own collapsing sheet.
+  {
+    const g = blank('carbon');
+    g.playerPos = { x: 0, y: 2 };
+    g.sheets.push({ tiles: [{ x: -1, y: 2 }], turnsLeft: 1 });
+    g.playerPos = { x: -1, y: 2 };
+    const hp = g.elementHealth;
+    g.passTurn();
+    expect(g.sheets.length === 0, 'sheet collapsed');
+    expect(g.elementHealth === hp, 'carbon unhurt by its own sheet');
+    expect(g.isPassable(g.playerPos.x, g.playerPos.y) && g.playerPos.x >= 0, 'carbon pushed back onto the grid');
+  }
+  console.log('scenarios: all passed');
+}
+
+// =====================================================================
+// Random play
+// =====================================================================
+
+const stats = { runs: 0, wins: 0, deaths: 0, unfinished: 0, evolutions: 0, gridsCleared: 0, bonds: 0, maxDepth: 0, hutBuys: 0, spearThrows: 0, sheets: 0, shatters: 0, rams: 0, tethers: 0, dashes: 0 };
+const deathsBy: Record<string, number> = {};
+const abilityUse: Record<string, number> = {};
+const killsBy: Record<string, number> = {};
+const ramKillsBy: Record<string, number> = {};
+const turnsAs: Record<string, number> = {};
+const playedAs: Record<string, number> = {};
+const scoredAs: Record<string, number> = {};
+const evolvedFrom: Record<string, number> = {};
+const bump = (r: Record<string, number>, k: string, n = 1) => { r[k] = (r[k] ?? 0) + n; };
+let lastActionWasRam = false;
+let aimTier: 1 | 3 | null = null;
+
+/** Counts an ability only when it actually resolved (photons were spent), including after aiming. */
+function trackedAbility(g: Game, tier: 1 | 3) {
+  const before = g.photons;
+  g.activateAbility(tier);
+  if (g.aiming) aimTier = tier;
+  else if (g.photons !== before) bump(abilityUse, `${g.currentElement}:${tier}`);
+}
+function trackedConfirm(g: Game, orientation: 'left' | 'right' = 'left') {
+  const before = g.photons, el = g.currentElement, tag = g.aimingFor;
+  g.confirmAim(orientation);
+  if (g.photons !== before && aimTier) bump(abilityUse, `${el}:${aimTier}`);
+  if (g.photons !== before && el === 'carbon' && tag === 'c_sheet') stats.sheets++;
+  if (g.photons !== before && el === 'hydrogen') { if (tag === 'h_bond') stats.tethers++; else if (tag === 'h_dash') stats.dashes++; }
+  if (tag === 'c_throw' && !g.aiming) stats.spearThrows++;
+  aimTier = null;
+}
+
+function randomStep(g: Game) {
+  lastActionWasRam = false;
+  if (g.atHut) {
+    const items: HutItem[] = ['evolve', 'heal', 'healthCatalyst', 'damageCatalyst'];
+    const affordable = items.filter(i => g.canBuy(i));
+    if (affordable.length && Math.random() < 0.8) { g.buy(pick(affordable)); stats.hutBuys++; }
+    else g.leaveHut();
+    return;
+  }
+  if (g.aiming) {
+    const d = pick(DIRS);
+    g.previewAim(d[2]);
+    if (Math.random() < 0.85) trackedConfirm(g, Math.random() < 0.5 ? 'left' : 'right'); else { g.cancelAim(); aimTier = null; }
+    return;
+  }
+  const options: Array<() => void> = [];
+  if (!g.movedThisTurn) {
+    const adj = DIRS.filter(([dx, dy]) => g.enemyAt(g.playerPos.x + dx, g.playerPos.y + dy));
+    const moveOpt = () => {
+      const d = adj.length && Math.random() < 0.6 ? pick(adj) : pick(DIRS);
+      const target = g.enemyAt(g.playerPos.x + d[0], g.playerPos.y + d[1]);
+      const before = { ...g.playerPos }, turnBefore = g.turn;
+      const res = g.movePlayer(d[0], d[1]);
+      if (res.needsConfirm) g.movePlayer(d[0], d[1], true);
+      if (target) {
+        stats.rams++;
+        lastActionWasRam = true;
+        // A ram never moves the player; only a turn ending afterwards (polarity, collapse) can.
+        if (g.turn === turnBefore && !same(before, g.playerPos)) throw new Error('ram moved the player onto the enemy tile');
+      }
+    };
+    options.push(moveOpt, moveOpt);
+  }
+  if (!g.usedAbilityThisTurn) {
+    if (g.encasedCount > 0) options.push(() => { g.shatter(); stats.shatters++; });
+    if (g.heldSpear !== null) options.push(() => g.beginThrow());
+    const abilityOpt = () => trackedAbility(g, Math.random() < 0.6 ? 1 : 3);
+    options.push(abilityOpt, abilityOpt);
+  }
+  if (options.length === 0 || Math.random() < 0.08) g.passTurn();
+  else pick(options)();
+}
+
+// =====================================================================
+// Goal-seeking play: rams when healthy, shops when evolve is affordable
+// =====================================================================
+
+/** First step of a shortest path to a goal tile. With `avoidEnemies`, enemy tiles are walls unless they are the goal. */
+function bfsToward(g: Game, isGoal: (p: Pos) => boolean, avoidEnemies = false): [number, number] | null {
+  const key = (p: Pos) => `${p.x},${p.y}`;
+  const prev = new Map<string, string | null>();
+  const queue: Pos[] = [g.playerPos];
+  prev.set(key(g.playerPos), null);
+  let found: Pos | null = null;
+  while (queue.length && !found) {
+    const p = queue.shift()!;
+    for (const [dx, dy] of DIRS) {
+      const n = { x: p.x + dx, y: p.y + dy };
+      if (!g.isPassable(n.x, n.y) || g.isScorched(n.x, n.y) || prev.has(key(n))) continue;
+      const goal = isGoal(n);
+      if (!goal && avoidEnemies && g.enemyAt(n.x, n.y)) continue;
+      prev.set(key(n), key(p));
+      if (goal) { found = n; break; }
+      queue.push(n);
+    }
+  }
+  if (!found) return null;
+  let cur = key(found), back = prev.get(cur)!;
+  while (back !== null && back !== key(g.playerPos)) { cur = back; back = prev.get(cur)!; }
+  const [x, y] = cur.split(',').map(Number);
+  return [x - g.playerPos.x, y - g.playerPos.y];
+}
+
+/** Once an ability fails to resolve in a turn (cancelled aim, no valid target), stop retrying it that turn. */
+let abilityGivenUpAt = -1;
+
+function sensibleStep(g: Game) {
+  lastActionWasRam = false;
+  if (g.atHut) {
+    if (g.canBuy('evolve')) { g.buy('evolve'); stats.hutBuys++; return; }
+    if (g.canBuy('heal') && g.elementHealth * 2 <= g.maxHealth) { g.buy('heal'); stats.hutBuys++; return; }
+    g.leaveHut(); return;
+  }
+  if (g.aiming) {
+    let aimed = false;
+    for (const d of DIRS) { g.previewAim(d[2]); if (g.aimLine.some(t => g.enemyAt(t.x, t.y))) { aimed = true; break; } }
+    if (!aimed) {
+      if (g.aimingFor === 'c_sheet' || g.aimingFor === 'h_bond' || g.aimingFor === 'b_encase') { g.cancelAim(); aimTier = null; abilityGivenUpAt = g.turn; return; }
+      g.previewAim(pick(DIRS)[2]);
+    }
+    const before = g.photons, spear = g.aimingFor === 'c_throw';
+    trackedConfirm(g);
+    if (g.photons === before && !spear && !g.usedAbilityThisTurn) abilityGivenUpAt = g.turn;
+    return;
+  }
+  const turnBefore = g.turn, depthBefore = g.depth;
+  const acted = () => g.turn !== turnBefore || g.depth !== depthBefore;
+  const healthy = g.elementHealth >= 3 || g.shieldPoints > 0;
+  const adj = DIRS.filter(([dx, dy]) => g.enemyAt(g.playerPos.x + dx, g.playerPos.y + dy));
+  if (!g.usedAbilityThisTurn && g.abilityLockedTurns === 0 && abilityGivenUpAt !== g.turn) {
+    if (g.encasedCount > 0) { g.shatter(); stats.shatters++; return; }
+    if (g.heldSpear !== null && g.enemies.length) { g.beginThrow(); return; }
+    let tier: 1 | 3 | null = adj.length && g.photons >= 3 ? 3 : adj.length && g.photons >= 1 ? 1 : null;
+    if (g.currentElement === 'carbon') tier = g.photons >= 3 && g.heldSpear === null ? 3 : null;
+    if (tier) {
+      trackedAbility(g, tier);
+      if (g.usedAbilityThisTurn || g.aiming || acted()) return;
+      abilityGivenUpAt = g.turn;
+    }
+  }
+  if (!g.movedThisTurn) {
+    let d: [number, number] | null = null;
+    if (adj.length && healthy) d = [adj[0][0], adj[0][1]];
+    else if (g.evolvePrice !== null && g.photons >= g.evolvePrice) d = bfsToward(g, p => same(p, g.layout.hut), !healthy) ?? (healthy ? null : bfsToward(g, p => same(p, g.layout.hatch), true));
+    else if (healthy && g.enemies.length) d = bfsToward(g, p => !!g.enemyAt(p.x, p.y));
+    else d = bfsToward(g, p => same(p, g.layout.hatch), !healthy);
+    if (d) {
+      const target = g.enemyAt(g.playerPos.x + d[0], g.playerPos.y + d[1]);
+      const before = { ...g.playerPos }, moveTurn = g.turn;
+      const r = g.movePlayer(d[0], d[1]);
+      if (r.needsConfirm) g.movePlayer(d[0], d[1], true);
+      if (target) { stats.rams++; lastActionWasRam = true; if (g.turn === moveTurn && !same(before, g.playerPos)) throw new Error('ram moved the player'); }
+      if (g.movedThisTurn || acted()) return;
+    }
+  }
+  g.passTurn();
+}
+
+function runGames(policy: (g: Game) => void, runs: number, maxSteps: number) {
+  for (let run = 0; run < runs; run++) {
+    const start = ELEMENT_ORDER[run % ELEMENT_ORDER.length];
+    const g = new Game(start);
+    let lastEl = g.currentElement, lastGrids = 0;
+    const seenBonds = new Set<number>();
+    const killsThisGame: Record<string, number> = {};
+    bump(playedAs, start);
+    for (let step = 0; step < maxSteps && !g.gameOver; step++) {
+      const el = g.currentElement, killsBefore = g.totalKills, turnBefore = g.turn, depthBefore = g.depth;
+      const polarityBefore = g.layout.polarity;
+      try {
+        policy(g);
+        assertInvariants(g);
+        if (g.turn !== turnBefore && !g.gameOver && (g.movedThisTurn || g.usedAbilityThisTurn)) throw new Error('action flags not reset after the turn ended');
+        if (g.depth !== depthBefore && (g.movedThisTurn || g.usedAbilityThisTurn)) throw new Error('action flags not reset on a new grid');
+        if (g.depth !== depthBefore && polarityBefore && g.layout.polarity) throw new Error('polarity on two grids in a row');
+        if (g.depth === 3 && depthBefore === 2 && !g.layout.polarity) throw new Error('first polarity grid missing');
+      } catch (err) {
+        console.error('FAILED run', run, 'step', step, 'element', g.currentElement, 'depth', g.depth, (err as Error).message);
+        throw err;
+      }
+      const gained = g.totalKills - killsBefore;
+      if (gained > 0) {
+        bump(killsBy, el, gained);
+        bump(killsThisGame, el, gained);
+        if (lastActionWasRam) bump(ramKillsBy, el, gained);
+      }
+      if (g.turn !== turnBefore) bump(turnsAs, el);
+      if (g.currentElement !== lastEl) { stats.evolutions++; bump(evolvedFrom, lastEl); bump(playedAs, g.currentElement); lastEl = g.currentElement; }
+      if (g.gridsCleared !== lastGrids) { stats.gridsCleared++; lastGrids = g.gridsCleared; }
+      for (const e of g.enemies) if (e.bonded && !seenBonds.has(e.id)) { seenBonds.add(e.id); stats.bonds++; }
+      stats.maxDepth = Math.max(stats.maxDepth, g.depth);
+    }
+    for (const el of Object.keys(killsThisGame)) bump(scoredAs, el);
+    stats.runs++;
+    if (g.gameOver) {
+      if (g.won) stats.wins++; else { stats.deaths++; bump(deathsBy, g.message); }
+    } else stats.unfinished++;
+  }
+}
+
+// =====================================================================
+// Noble-gas probe: a hatch-seeking policy, to check the turn limit is fair
+// =====================================================================
+
+/** Hatch-seeking play through several grids of growing size, to check the turn limit is fair but not slack. */
+function runNobleProbe(element: ElementKey, runs: number, grids: number) {
+  const clearedAtLeast = Array(grids + 1).fill(0) as number[];
+  let destabilised = 0, otherDeaths = 0;
+  const turnsPerGrid: number[][] = Array.from({ length: grids }, () => []);
+  for (let run = 0; run < runs; run++) {
+    const g = new Game(element);
+    let gridTurnStart = 0;
+    for (let step = 0; step < 600 && !g.gameOver && g.gridsCleared < grids; step++) {
+      const before = g.gridsCleared;
+      if (g.atHut) { g.leaveHut(); continue; }
+      if (g.aiming) { g.previewAim(pick(DIRS)[2]); g.confirmAim(); continue; }
+      if (!g.movedThisTurn) {
+        const d = bfsToward(g, p => same(p, g.layout.hatch));
+        if (d) { const r = g.movePlayer(d[0], d[1]); if (r.needsConfirm) g.movePlayer(d[0], d[1], true); }
+        if (g.gridsCleared > before) {
+          turnsPerGrid[before].push(g.turn - gridTurnStart);
+          gridTurnStart = g.turn;
+          continue;
+        }
+      }
+      if (g.movedThisTurn && !g.usedAbilityThisTurn && g.photons >= 1) {
+        g.activateAbility(g.photons >= 3 && Math.random() < 0.3 ? 3 : 1);
+        if (g.usedAbilityThisTurn) continue;
+      }
+      g.passTurn();
+      assertInvariants(g);
+    }
+    for (let k = 1; k <= grids; k++) if (g.gridsCleared >= k) clearedAtLeast[k]++;
+    if (g.gameOver && g.message.startsWith('Destabilised')) destabilised++;
+    else if (g.gameOver && !g.won) otherDeaths++;
+  }
+  const perGrid = turnsPerGrid.map((t, i) => t.length
+    ? `grid ${i + 1}: ${(t.reduce((a, b) => a + b, 0) / t.length).toFixed(1)} of ${gridSizeFor(i + 1) + 3}`
+    : `grid ${i + 1}: -`).join(', ');
+  const reach = Array.from({ length: grids }, (_, i) => `≥${i + 1}: ${clearedAtLeast[i + 1]}`).join(', ');
+  console.log(`  ${element.padEnd(7)} cleared ${reach} of ${runs}; destabilised ${destabilised}, other deaths ${otherDeaths}; avg turns used ${perGrid}`);
+}
+
+function report(title: string) {
+  console.log(`\n=== ${title} ===`);
+  console.log(JSON.stringify(stats));
+  console.log('deaths by cause:', deathsBy);
+  console.log('ability use:', abilityUse);
+  console.log('per-element:');
+  for (const el of ELEMENT_ORDER) {
+    const played = playedAs[el] ?? 0, scored = scoredAs[el] ?? 0, turns = turnsAs[el] ?? 0, kills = killsBy[el] ?? 0;
+    console.log(`  ${el.padEnd(10)} games ${String(played).padStart(3)}  with ≥1 kill ${String(scored).padStart(3)} (${played ? Math.round(100 * scored / played) : 0}%)  kills ${String(kills).padStart(4)}  by ram ${String(ramKillsBy[el] ?? 0).padStart(4)}  kills/turn ${turns ? (kills / turns).toFixed(2) : '-'}  evolved ${String(evolvedFrom[el] ?? 0).padStart(3)}`);
+  }
+}
+function resetStats() {
+  for (const k of Object.keys(stats) as Array<keyof typeof stats>) stats[k] = 0;
+  for (const r of [deathsBy, abilityUse, killsBy, ramKillsBy, turnsAs, playedAs, scoredAs, evolvedFrom]) for (const k of Object.keys(r)) delete r[k];
+}
+
+// =====================================================================
+
+runScenarios();
+
+runGames(randomStep, 600, 400);
+report('random play (600 games): invariants hold');
+
+resetStats();
+runGames(sensibleStep, 600, 600);
+report('goal-seeking play (600 games): kill/evolve reach');
+
+console.log('\n=== noble-gas hatch probe (200 games each, hatch-seeking; Neon wins on its first hatch) ===');
+runNobleProbe('helium', 200, 3);
+runNobleProbe('neon', 200, 1);
