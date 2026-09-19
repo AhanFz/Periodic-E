@@ -9,7 +9,7 @@ export type GridShape = 'plain' | 'void' | 'split' | 'eroded';
 
 export type AimTag =
   | 'h_bond' | 'h_dash'
-  | 'li_paralyze' | 'li_burst3'
+  | 'li_beam'
   | 'b_encase'
   | 'c_sheet' | 'c_throw'
   | 'n_blast2';
@@ -21,6 +21,17 @@ export type FxType =
 
 export type MessageType = 'info' | 'success' | 'warning' | 'danger';
 export type HutItem = 'evolve' | 'heal' | 'healthCatalyst' | 'damageCatalyst';
+
+/**
+ * Physical feedback the engine asks for. The engine only names what happened; the UI decides
+ * which buzz that is, and plays at most the most significant cue of an action.
+ */
+export type HapticCue =
+  | 'death' | 'win' | 'evolve' | 'damage' | 'shielded' | 'kill' | 'ram' | 'hit'
+  | 'blocked' | 'photon' | 'buy';
+
+/** What a long press on the board opened: your own atom, or one halogen by id. */
+export type InspectTarget = { kind: 'player' } | { kind: 'enemy'; id: number };
 
 export interface Pos { x: number; y: number; }
 
@@ -84,9 +95,18 @@ export interface ElementDef {
   ability2Short: string;
   ability2Name: string;
   ability2Desc: string;
+  ability2Cost: number;
 }
 
-export interface EnemyDef { symbol: string; health: number; desc: string; }
+export interface EnemyDef {
+  symbol: string;
+  health: number;
+  desc: string;
+  /** What the board shows you before it acts. */
+  tell: string;
+  /** How to beat it. */
+  counter: string;
+}
 
 export interface MoveResult { needsConfirm: boolean; }
 

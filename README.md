@@ -48,14 +48,31 @@ No simulator, Xcode or Android Studio is needed — Expo Go runs the game direct
 into the next element. Escaping the hatch as **Neon** wins the run. Running out of health ends it.
 
 **Each turn you get one move and one ability, in either order.** The turn ends when both are spent, or
-when you press *End turn*. The two checkboxes above the buttons show what you have left.
+when you press *End turn*. The two checkboxes above the buttons show what you have left. You can also
+spend nothing at all: the same button reads *Skip turn* until you act, and waiting is often the right
+move against a Fluorine that has armed.
+
+**The tile you arrive on is ringed in blue** for the first turn of every grid, including a grid you have
+just dropped into through the hatch. After that turn the board goes back to normal.
 
 **Ramming.** Walk into an enemy to attack it: it takes 2 damage, you take 1, and you stay where you were.
 Every element can do this. Frozen enemies shatter for free. Ramming a Fluorine defuses it. Ramming Bromine
 locks your abilities for the next turn.
 
 **Photons (🔆)** are the currency. You start with 2, get 1 per kill (2 for a molecule), and can pick up loose
-ones on the board, up to 5. Tier-1 abilities cost 1, tier-3 abilities cost 3.
+ones on the board, up to 5. Tier-1 abilities cost 1, tier-3 abilities cost 3, and the price is printed on
+each button. Lithium is the one element that makes photons rather than only spending them.
+
+**Health comes from atomic weight.** A heavier nucleus is more matter to knock apart, so every evolution up
+the table is also a bigger health bar, from Hydrogen's 4 to Neon's 10. Evolving refills it.
+
+**Hold any atom on the board** — yours or a halogen's — for a card with its readings, what it does, the tell
+that says what it is about to do, and how to beat it. It costs no turn.
+
+**Pause (⏸, top right)** shows where the run stands and offers Resume, Restart, or Quit to contents.
+
+**The phone buzzes** with what happens: a thump when you ram, a heavier one when you take damage, a rising
+three-beat when you evolve. Devices without a haptic engine simply stay quiet.
 
 **The isotope hut** sells: *Evolve* (price drops by 1 for every kill on the current grid), *Heal*, and two
 permanent catalysts (+2 max health, or +1 damage to abilities and rams).
@@ -65,17 +82,19 @@ health each turn.
 
 ### The elements
 
-| | Tier 1 (1 🔆) | Tier 3 (3 🔆) |
-|---|---|---|
-| **H** Hydrogen (3 HP) | **Hydrogen Bond** — tether an adjacent enemy for 2 turns; it trails behind you and cannot act | **Double Dash** — dash 2 tiles, 3 damage to everything you pass through, none to you |
-| **He** Helium (5) | **Freeze** the 4 tiles around you for 2 turns | **Deep Freeze** all 8 neighbours for 3 rounds |
-| **Li** Lithium (4) | **Paralysis Ray** down a line; kills anything already paralyzed | **Burst** — 3 damage down a line |
-| **Be** Beryllium (5) | **Shield** +2; ramming is free while it holds | **Inert Shield** +3, free ramming, poison immunity |
-| **B** Boron (6) | **Dopant Trap** under your feet; paralyzes and suppresses the next enemy to step on it | **Encase** an adjacent enemy in glass; **Shatter** it for free later |
-| **C** Carbon (7) | **Graphene Sheet** — bridge over void or off an edge; collapses in 3 turns | **Diamond Spear** — 3 damage per hit, range 4; throw it for free, pick it up, throw again |
-| **N** Nitrogen (6) | **Blast** 2 tiles in a line, scorching them | **Blast 4** — all 4 neighbours |
-| **O** Oxygen (6) | **Heal** 1 | **Ozone Layer** — 3 damage to all 8 neighbours, then 2 damage in a star two tiles out |
-| **Ne** Neon (8) | **Blinding Flash** — neighbours flee for 2 rounds | **All-Out Flash** — 1 damage to every enemy and freeze them |
+Health is `4 + ⌊mass ÷ 3⌋`, so it is the atomic weight that decides how much punishment an element takes.
+
+| | Mass | HP | Tier 1 | Tier 3 |
+|---|---|---|---|---|
+| **H** Hydrogen | 1.008 | 4 | **Hydrogen Bond** (1 🔆) — tether an adjacent enemy for 2 turns; it trails behind you and cannot act | **Double Dash** (3 🔆) — dash 2 tiles, 3 damage to everything you pass through, none to you |
+| **He** Helium | 4.003 | 5 | **Freeze** (1 🔆) the 4 tiles around you for 2 turns | **Deep Freeze** (3 🔆) all 8 neighbours for 3 rounds |
+| **Li** Lithium | 6.94 | 6 | **Battery** (1 🔆) — charge for 3 turns, counting the one you start it in; take no damage and it discharges for 4 photons, take a hit and it shorts out | **Ion Beam** (3 🔆) — 2 damage and paralysis to everything in one direction, straight across voids to the far edge |
+| **Be** Beryllium | 9.012 | 7 | **Shield** (1 🔆) +2; ramming is free while it holds | **Inert Shield** (3 🔆) +3, free ramming, poison immunity |
+| **B** Boron | 10.81 | 7 | **Dopant Trap** (1 🔆) under your feet; burns the next enemy to step on it for 1, then paralyzes and suppresses it | **Encase** (3 🔆) an adjacent enemy in glass; **Shatter** it for free later |
+| **C** Carbon | 12.011 | 8 | **Graphene Sheet** (1 🔆) — bridge over void or off an edge; collapses in 3 turns | **Diamond Spear** (3 🔆) — 3 damage per hit, range 4; throw it for free, pick it up, throw again |
+| **N** Nitrogen | 14.007 | 8 | **Blast** (1 🔆) 2 tiles in a line, scorching them | **Blast 4** (3 🔆) — all 4 neighbours |
+| **O** Oxygen | 15.999 | 9 | **Heal** (1 🔆) 1 | **Ozone Layer** (3 🔆) — 3 damage to all 8 neighbours, then 2 damage in a star two tiles out |
+| **Ne** Neon | 20.180 | 10 | **Blinding Flash** (1 🔆) — neighbours flee for 2 rounds | **All-Out Flash** (3 🔆) — 1 damage to every enemy and freeze them |
 
 ### The halogens
 
@@ -100,7 +119,17 @@ We would especially like to hear about:
 - **Clarity.** Was it obvious what a button would do? Did any message leave you unsure what just happened?
 - **The two-action turn.** Did "move + ability, either order" feel natural? Did you ever end a turn by accident?
 - **Ramming.** Does it feel worth doing? Which elements did you ram with most?
-- **Reaching the hut.** How often could you afford to evolve? Which element felt stuck?
+- **Reaching the hut.** How often could you afford to evolve? Which element felt stuck? Hydrogen and Boron
+  were both cheapened this build, so tell us whether the early table still drags.
+- **Lithium's Battery.** Is three turns of staying untouched a real decision, or do you either always take
+  it or never bother? Did you ever charge it and immediately regret it? Does the countdown in the ability
+  box match what you expect the turn you start it?
+- **Health from atomic weight.** Every element now has more health than before, growing as you climb.
+  Does the extra padding make fights feel readable, or does it just make them longer?
+- **The atom cards.** Did you find them without being told? Did the *Counter* line tell you something
+  the board did not already say?
+- **Haptics.** Right amount, too much, or too little? Tell us your phone model — the buzz differs a lot
+  between iPhones and Android handsets.
 - **Difficulty.** Which halogen killed you most? Did anything feel unfair rather than hard?
 - **The board.** Could you read the tiles, the electron rings and the status icons at a glance? Any layout
   problems on your phone size?
@@ -123,7 +152,8 @@ General feedback ("Lithium feels useless", "the timer is too tight") is just as 
 
 ## For developers
 
-Built on **Expo SDK 57** (React Native 0.86, React 19.2.3, TypeScript 6).
+Built on **Expo SDK 57** (React Native 0.86, React 19.2.3, TypeScript 6). The only native module is
+`expo-haptics`, which Expo Go already carries — no dev build needed.
 
 ```
 src/game/      pure game logic, no React imports — headlessly testable
@@ -131,8 +161,9 @@ src/game/      pure game logic, no React imports — headlessly testable
   grid.ts       procedural layouts + flood-fill validation
   engine.ts     the Game class: rules, ramming, abilities, enemies, bonding, polarity, hut
   view.ts       per-tile render data
-src/store/     zustand store: screen routing, async Iodine confirm, hut modal
+src/store/     zustand store: screen routing, async Iodine confirm, hut modal, pause, inspection
 src/ui/        theme, components, screens (textbook presentation)
+  haptics.ts    turns the engine's cues into device feedback
 sim/           headless simulator: worked-example scenarios, random and goal-seeking play, invariants
 ```
 
@@ -150,6 +181,35 @@ Notes:
   versions by hand.
 - Core `Animated` is used for all motion so the game runs in Expo Go with no native config. Emoji stand in
   for icons and FX.
-- Balance, from the simulator: Hydrogen is the weakest element (3 HP makes ramming expensive), Nitrogen the
-  strongest (3-damage blasts for 1 photon), and Lithium's Burst is overpriced at 3 photons. Tuning numbers
-  live in `src/game/constants.ts`.
+- Voids are drawn as holes in the page rather than shaded paper: near-black, with a few slow-twinkling
+  points of light whose positions are hashed from the tile's own coordinates, so a given hole keeps its
+  constellation instead of reshuffling on each render.
+- `Game.showStartMarker` is true only during a grid's first turn, which is what the blue ring reads from.
+  It deliberately does not key off `turnsOnGrid`, because evolving resets that counter for the noble-gas
+  timer and the ring would reappear in the middle of a grid.
+- Tuning numbers live in `src/game/constants.ts`. Max health is not a table any more: it is derived from
+  `ATOMIC_MASS` through `healthForMass`, so moving `BASE_HEALTH` or `AMU_PER_HEALTH` moves every element at
+  once, and a simulator scenario pins the resulting curve and checks it never falls as you evolve.
+- Balance, from the simulator (600 goal-seeking games per configuration). Hydrogen was the problem child:
+  at 3 HP it could not afford the two rams its kit assumes, and it scored a kill in 21% of its games. A
+  floor of 4 takes that to 67% and roughly doubles total evolutions across the run set, while the win rate
+  stays inside its noise band. Lithium's Burst went to 2 photons, Hydrogen's evolve price to 3 and Boron's
+  to 5; all three now evolve an order of magnitude more often. Nitrogen is still the strongest element and
+  is left alone deliberately: pricing its Blast at 2 photons cut total evolutions by a quarter, because
+  Nitrogen is the payoff on the way to Oxygen and Neon.
+- Lithium was rebuilt because a 2-photon Burst made its Paralysis Ray pointless: the expensive ability did
+  strictly more, including the paralysis. It is now an economy element. *Battery* spends a photon to charge
+  and pays 4 back if nothing touches you, which turns Lithium's weak offence into a reason to kite;
+  *Ion Beam* is the line attack, at 3 photons, and it is the only thing in the game that fires across a
+  void. In the simulator Lithium went from evolving twice per 120 games to roughly 17, and both abilities
+  now see use rather than one shadowing the other.
+- The battery's window is counted in turn-ends, and the turn you start it in is the first of them. Charging
+  is an ability, so on a turn you have already moved it ends the turn immediately; treating that as a full
+  turn of charge made the cell pay out after what felt like one turn. Widening the window to three cost
+  Lithium real power, and the payout went from 3 to 4 to buy some of it back. It cannot go much higher:
+  with a photon store of 5, and 1 spent to charge, anything above 4 is mostly spilled. Note also that the
+  simulator's policy charges and then walks straight back into a fight, so it under-sells the ability by
+  design — trust play-testing over the numbers here.
+- Physical feedback is a two-layer thing: `src/game/engine.ts` records *what happened* as `hapticCues`,
+  and `src/ui/haptics.ts` decides which buzz that is, playing only the most significant cue per action.
+  The engine stays free of React and of Expo; the simulator never drains the queue, so it is capped.

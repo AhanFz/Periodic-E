@@ -1,5 +1,5 @@
 import { Game } from '../src/game/engine';
-import { ELEMENT_ORDER, ENEMIES } from '../src/game/constants';
+import { ATOMIC_MASS, BATTERY_PAYOUT, BATTERY_TURNS, ELEMENTS, ELEMENT_ORDER, ENEMIES, PHOTON_CAP, healthForMass } from '../src/game/constants';
 import { gridSizeFor } from '../src/game/grid';
 import type { Direction, ElementKey, Enemy, EnemyType, HutItem, Pos } from '../src/game/types';
 
@@ -21,6 +21,7 @@ function assertInvariants(g: Game) {
   if (!g.isPassable(g.playerPos.x, g.playerPos.y)) throw new Error('player on impassable tile ' + JSON.stringify(g.playerPos));
   if (g.enemyAt(g.playerPos.x, g.playerPos.y)) throw new Error('enemy sharing the player tile');
   if (g.heldSpear !== null && g.heldSpear <= 0) throw new Error('held spear with no durability');
+  if (g.batteryTurnsLeft < 0 || g.batteryTurnsLeft > BATTERY_TURNS) throw new Error('battery out of range ' + g.batteryTurnsLeft);
   if (g.polarity.active && !g.polarity.direction) throw new Error('polarity active without a direction');
   if (g.polarity.active && (g.polarity.countdown < 1 || g.polarity.countdown > 4)) throw new Error('polarity countdown out of range ' + g.polarity.countdown);
   if (g.groundedSpear && g.groundedSpear.health <= 0) throw new Error('grounded spear with no durability');
@@ -153,7 +154,7 @@ function runScenarios() {
     g.movePlayer(0, -1);
     expect(c.x === 0 && c.y === 2, 'dragged into the vacated tile, at ' + JSON.stringify({ x: c.x, y: c.y }));
     expect(g.playerPos.x === 0 && g.playerPos.y === 1, 'player moved');
-    expect(g.turn === 1 && g.elementHealth === 3, 'turn ended and the tethered enemy did not attack');
+    expect(g.turn === 1 && g.elementHealth === g.maxHealth, 'turn ended and the tethered enemy did not attack');
     expect(c.tetherTurnsLeft === 1, 'tether ticked');
   }
   // Tethering a molecule with no room fails and costs nothing.
@@ -166,7 +167,7 @@ function runScenarios() {
   }
   // One move and one ability per turn, either order; aiming then cancelling keeps the slot.
   {
-    const g = blank('lithium'); g.photons = 2;
+    const g = blank('nitrogen'); g.photons = 2;
     g.activateAbility(1); g.previewAim('right'); g.cancelAim();
     expect(!g.usedAbilityThisTurn, 'cancelled aim did not spend the slot');
     g.activateAbility(1); g.previewAim('right'); g.confirmAim();
@@ -184,6 +185,7 @@ function runScenarios() {
     const f = mkEnemy(g, 'fluorine', 3, 2); f.plannedDx = -1;
     g.passTurn();
     expect(f.x === 2 && f.paralyzed && !f.armed && f.explodeTiles.length === 0, 'trapped fluorine is paralyzed and defused: ' + JSON.stringify({ x: f.x, paralyzed: f.paralyzed, armed: f.armed }));
+    expect(f.health === 1, 'the trap burned it for 1, got ' + f.health);
     const hp = g.elementHealth;
     g.passTurn();
     expect(g.enemies.includes(f) && g.elementHealth === hp, 'defused fluorine did not detonate');
@@ -210,6 +212,109 @@ function runScenarios() {
     expect(g.sheets.length === 0, 'sheet collapsed');
     expect(g.elementHealth === hp, 'carbon unhurt by its own sheet');
     expect(g.isPassable(g.playerPos.x, g.playerPos.y) && g.playerPos.x >= 0, 'carbon pushed back onto the grid');
+  }
+  // Lithium's Battery: three clean turn-ends pay it out, the turn it was started in included.
+  {
+    const g = blank('lithium');
+    g.photons = 2;
+    g.activateAbility(1);
+    expect(g.photons === 1 && g.batteryTurnsLeft === 3, 'charged for one photon, got ' + g.batteryTurnsLeft);
+    expect(g.usedAbilityThisTurn && !g.movedThisTurn, 'charging spent only the ability slot');
+    g.enemies = [];
+    for (const left of [2, 1]) {
+      g.passTurn(); g.enemies = [];
+      expect(g.batteryTurnsLeft === left && g.photons === 1, `still charging, expected ${left}, got ${g.batteryTurnsLeft}`);
+    }
+    g.passTurn(); g.enemies = [];
+    expect(g.batteryTurnsLeft === 0 && g.photons === Math.min(PHOTON_CAP, 1 + BATTERY_PAYOUT), 'paid out on the third turn-end, got ' + g.photons);
+  }
+  // Charging on a turn you have already moved ends that turn, and it still gets the full window.
+  {
+    const g = blank('lithium');
+    g.photons = 2;
+    g.enemies = [];
+    g.movePlayer(0, -1);
+    g.activateAbility(1);
+    expect(g.turn === 1, 'move then charge ended the turn');
+    expect(g.batteryTurnsLeft === 2, 'that turn-end counted once, got ' + g.batteryTurnsLeft);
+    g.enemies = [];
+    g.passTurn(); g.enemies = [];
+    g.passTurn(); g.enemies = [];
+    expect(g.photons === Math.min(PHOTON_CAP, 1 + BATTERY_PAYOUT), 'paid out two turn-ends later, got ' + g.photons);
+  }
+  // Any health lost shorts the charge, with no refund.
+  {
+    const g = blank('lithium');
+    g.photons = 2;
+    g.activateAbility(1);
+    mkEnemy(g, 'iodine', 1, 2);
+    g.movePlayer(1, 0);
+    expect(g.batteryTurnsLeft === 0, 'the ram shorted the charge');
+    g.enemies = [];
+    for (let i = 0; i < 3; i++) { g.passTurn(); g.enemies = []; }
+    expect(g.photons === 1, 'a shorted cell pays nothing and refunds nothing, got ' + g.photons);
+  }
+  // Ion Beam runs straight across a void and paralyzes what it does not kill.
+  {
+    const g = blank('lithium');
+    g.photons = 3;
+    g.layout.passable[2][2] = false;
+    const far = mkEnemy(g, 'chlorine', 3, 2);
+    g.activateAbility(3); g.previewAim('right');
+    expect(g.aimLine.length === 4, 'the beam reaches the far edge, got ' + g.aimLine.length);
+    g.confirmAim();
+    expect(far.health === 1, 'took 2 through the void, got ' + far.health);
+    expect(far.paralyzed, 'and was paralyzed');
+    expect(g.photons === 0, 'beam cost 3');
+  }
+  // The start ring lasts exactly one turn, and a grid entered through the hatch rings its own.
+  {
+    const g = blank('carbon');
+    expect(g.showStartMarker, 'the arrival tile is ringed');
+    g.enemies = [];
+    g.passTurn(); g.enemies = [];
+    expect(!g.showStartMarker, 'the ring is gone once the first turn ends');
+    const depth = g.depth;
+    g.playerPos = { x: 3, y: 0 };
+    g.movePlayer(1, 0);
+    expect(g.depth === depth + 1, 'took the hatch, got depth ' + g.depth);
+    expect(g.showStartMarker, 'the new grid rings its own start tile');
+    expect(!g.movedThisTurn, 'a new grid starts with a fresh turn');
+  }
+  // A turn can be passed with nothing spent at all.
+  {
+    const g = blank('boron');
+    g.enemies = [];
+    g.passTurn();
+    expect(g.turn === 1, 'skipped a turn with no move and no ability');
+    expect(!g.movedThisTurn && !g.usedAbilityThisTurn, 'flags reset');
+  }
+  // Health is derived from atomic weight and never drops as you evolve.
+  {
+    const expected: Record<string, number> = {
+      hydrogen: 4, helium: 5, lithium: 6, beryllium: 7, boron: 7, carbon: 8, nitrogen: 8, oxygen: 9, neon: 10,
+    };
+    let last = 0;
+    for (const el of ELEMENT_ORDER) {
+      const h = ELEMENTS[el].health;
+      expect(h === expected[el], `${el} health ${h}, expected ${expected[el]}`);
+      expect(h === healthForMass(parseFloat(ATOMIC_MASS[el])), `${el} health does not follow its mass`);
+      expect(h >= last, `health fell at ${el}: ${last} -> ${h}`);
+      last = h;
+    }
+    const g = new Game('neon');
+    expect(g.maxHealth === 10 && g.elementHealth === 10, 'neon starts at 10');
+  }
+  // Evolving raises max health and refills it.
+  {
+    const g = blank('lithium');
+    g.photons = 5; g.playerPos = { ...g.layout.hut }; g.elementHealth = 2;
+    g.atHut = true;
+    const before = g.maxHealth;
+    g.buy('evolve');
+    expect(g.currentElement === 'beryllium', 'evolved to beryllium');
+    expect(g.maxHealth === before + 1, `max health rose ${before} -> ${g.maxHealth}`);
+    expect(g.elementHealth === g.maxHealth, 'refilled on evolve');
   }
   console.log('scenarios: all passed');
 }
@@ -350,8 +455,14 @@ function sensibleStep(g: Game) {
   if (!g.usedAbilityThisTurn && g.abilityLockedTurns === 0 && abilityGivenUpAt !== g.turn) {
     if (g.encasedCount > 0) { g.shatter(); stats.shatters++; return; }
     if (g.heldSpear !== null && g.enemies.length) { g.beginThrow(); return; }
-    let tier: 1 | 3 | null = adj.length && g.photons >= 3 ? 3 : adj.length && g.photons >= 1 ? 1 : null;
-    if (g.currentElement === 'carbon') tier = g.photons >= 3 && g.heldSpear === null ? 3 : null;
+    let tier: 1 | 3 | null = adj.length && g.photons >= g.abilityCost(3) ? 3 : adj.length && g.photons >= g.abilityCost(1) ? 1 : null;
+    if (g.currentElement === 'carbon') tier = g.photons >= g.abilityCost(3) && g.heldSpear === null ? 3 : null;
+    // Lithium's Battery wants the opposite of a brawl: charge it only with nothing adjacent.
+    if (g.currentElement === 'lithium') {
+      tier = adj.length && g.photons >= g.abilityCost(3) ? 3
+        : !adj.length && g.batteryTurnsLeft === 0 && g.photons >= g.abilityCost(1) && g.photons < 5 ? 1
+        : null;
+    }
     if (tier) {
       trackedAbility(g, tier);
       if (g.usedAbilityThisTurn || g.aiming || acted()) return;
@@ -443,8 +554,9 @@ function runNobleProbe(element: ElementKey, runs: number, grids: number) {
           continue;
         }
       }
-      if (g.movedThisTurn && !g.usedAbilityThisTurn && g.photons >= 1) {
-        g.activateAbility(g.photons >= 3 && Math.random() < 0.3 ? 3 : 1);
+      if (g.movedThisTurn && !g.usedAbilityThisTurn && g.photons >= Math.min(g.abilityCost(1), g.abilityCost(3))) {
+        const tier: 1 | 3 = g.photons >= g.abilityCost(3) && Math.random() < 0.3 ? 3 : 1;
+        g.activateAbility(tier);
         if (g.usedAbilityThisTurn) continue;
       }
       g.passTurn();

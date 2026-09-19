@@ -1,6 +1,6 @@
 import { ENEMIES, ENEMY_COLORS, ELEMENT_COLORS, HALOGEN_VALENCE, VALENCE } from './constants';
 import type { Game } from './engine';
-import type { Fx } from './types';
+import type { Fx, InspectTarget } from './types';
 
 export type TileTint =
   | 'hazard' | 'warning' | 'danger' | 'frozen' | 'paralyzed' | 'encased' | 'bonding' | 'tethered'
@@ -39,7 +39,10 @@ export interface TileView {
   moveArrow: string | null;
   /** On a tethered enemy's tile: the link pointing at the player. */
   tetherArrow: string | null;
-  isStart: boolean;
+  /** What a long press here opens, if anything. Hidden Iodine is not inspectable. */
+  inspect: InspectTarget | null;
+  /** Ring the tile the player arrived on. True only on a grid's first turn. */
+  startGlow: boolean;
   isGhost: boolean;
   sheetTimer: number | null;
   fx: Fx[];
@@ -122,7 +125,7 @@ export function buildBoardView(game: Game): BoardView {
           isHalogen: false,
           healthPct: game.elementHealth / game.maxHealth,
           shielded: game.shieldPoints > 0,
-          statusIcon: game.heldSpear !== null ? '💠' : undefined,
+          statusIcon: game.heldSpear !== null ? '💠' : game.batteryTurnsLeft > 0 ? '🔋' : undefined,
         };
       } else if (enemy) {
         let statusIcon: string | undefined;
@@ -176,7 +179,8 @@ export function buildBoardView(game: Game): BoardView {
         tints,
         pulse: isWarning || isAim || isDanger || !!enemy?.paralyzed || (!!enemy && enemy.bondingWith !== null),
         atom, centerIcon, centerLabel, centerDim, threatIcon, moveArrow, tetherArrow,
-        isStart, isGhost,
+        inspect: isPlayer ? { kind: 'player' } : enemy ? { kind: 'enemy', id: enemy.id } : null,
+        startGlow: isStart && game.showStartMarker, isGhost,
         sheetTimer: sheet ? sheet.turnsLeft : null,
         fx: game.pendingEffects.filter(f => f.x === x && f.y === y),
       });

@@ -4,7 +4,10 @@ import { Tile } from './Tile';
 import { Caption } from './Print';
 import { fonts, theme } from '../theme';
 import { buildBoardView } from '@/game/view';
+import { tapFeedback } from '../haptics';
+import { useGameStore } from '@/store/gameStore';
 import type { Game } from '@/game/engine';
+import type { InspectTarget } from '@/game/types';
 
 interface Props { game: Game; tick: number; }
 
@@ -17,6 +20,8 @@ const BLEED = 6;
 
 export function Board({ game, tick }: Props) {
   const { width } = useWindowDimensions();
+  const inspect = useGameStore(s => s.inspect);
+  const onInspect = (target: InspectTarget) => { tapFeedback(); inspect(target); };
   const view = useMemo(() => buildBoardView(game), [game, tick]);
   const cols = view.cols;
   const rowCount = view.rows.length;
@@ -42,7 +47,7 @@ export function Board({ game, tick }: Props) {
             <View key={y} style={[styles.row, { marginBottom: y < rowCount - 1 ? GAP : 0 }]}>
               {row.map((t, x) => (
                 <View key={t.key} style={{ marginRight: x < row.length - 1 ? GAP : 0 }}>
-                  <Tile tile={t} size={cell} tick={tick} />
+                  <Tile tile={t} size={cell} tick={tick} onInspect={onInspect} />
                 </View>
               ))}
             </View>
@@ -61,7 +66,9 @@ export function Board({ game, tick }: Props) {
         <Text style={styles.legendItem}>🔆 photon</Text>
         <Text style={styles.legendItem}>↑ next move</Text>
         <Text style={styles.legendItem}>🪢 tethered</Text>
+        <Text style={styles.legendItem}><Text style={{ color: theme.playerElectron }}>◎</Text> where you started</Text>
       </View>
+      <Caption style={styles.hint}>Hold any atom for its card: what it does, what it is about to do, and how to beat it.</Caption>
     </View>
   );
 }
@@ -80,4 +87,5 @@ const styles = StyleSheet.create({
   captionLead: { fontStyle: 'normal', fontWeight: '700' },
   legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4 },
   legendItem: { fontFamily: fonts.serif, fontSize: 11, color: theme.textDim },
+  hint: { fontSize: 11, marginTop: 6 },
 });

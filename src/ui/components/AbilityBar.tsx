@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { SectionLabel } from './Print';
 import { fonts, theme } from '../theme';
-import { AIM_ACTION_WORDS, AIM_TITLES, ELEMENT_NAMES } from '@/game/constants';
+import { AIM_ACTION_WORDS, AIM_TITLES, BATTERY_PAYOUT, ELEMENT_NAMES } from '@/game/constants';
 import type { Game } from '@/game/engine';
 
 /** The element's kit, set as numbered properties in a definition box. */
@@ -32,7 +32,7 @@ export function AbilityBar({ game }: { game: Game }) {
       </View>
     );
   }
-  const ready3 = game.photons >= 3;
+  const ready3 = game.photons >= d.ability2Cost;
   return (
     <View style={[styles.box, { borderLeftColor: ready3 ? theme.gold : theme.accent }]}>
       <SectionLabel>§ Properties of {ELEMENT_NAMES[game.currentElement]}</SectionLabel>
@@ -40,8 +40,13 @@ export function AbilityBar({ game }: { game: Game }) {
         <Text style={styles.name}>1. {d.ability1Name}</Text> <Text style={styles.cost}>[{d.ability1Cost} 🔆]</Text> {d.ability1Desc}
       </Text>
       <Text style={styles.line}>
-        <Text style={styles.name}>2. {d.ability2Name}</Text> <Text style={[styles.cost, ready3 && styles.costReady]}>[3 🔆]</Text> {d.ability2Desc}
+        <Text style={styles.name}>2. {d.ability2Name}</Text> <Text style={[styles.cost, ready3 && styles.costReady]}>[{d.ability2Cost} 🔆]</Text> {d.ability2Desc}
       </Text>
+      {game.batteryTurnsLeft > 0 && (
+        <Text style={[styles.foot, { color: theme.green }]}>
+          🔋 Charging: {game.batteryTurnsLeft} turn{game.batteryTurnsLeft === 1 ? '' : 's'} to go. Take no damage and it pays {BATTERY_PAYOUT} photons.
+        </Text>
+      )}
       {game.damageBonus > 0 && <Text style={styles.foot}>Damage catalyst: +{game.damageBonus} to abilities and rams.</Text>}
       {game.usedAbilityThisTurn && <Text style={styles.foot}>Ability spent this turn — move or end the turn.</Text>}
     </View>

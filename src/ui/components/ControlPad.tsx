@@ -52,7 +52,7 @@ export function ControlPad({ game }: { game: Game }) {
   const used = game.usedAbilityThisTurn;
   const locked = game.abilityLockedTurns > 0;
   const can1 = game.photons >= d.ability1Cost && !locked && !used;
-  const can3 = game.photons >= 3 && !locked && !used;
+  const can3 = game.photons >= d.ability2Cost && !locked && !used;
   const anySpent = moved || used;
 
   return (
@@ -60,15 +60,16 @@ export function ControlPad({ game }: { game: Game }) {
       <View style={styles.slots}>
         <Slot label="Move" spent={moved} />
         <Slot label="Ability" spent={used} />
-        <Text style={styles.slotHint}>{anySpent ? (moved && used ? '' : 'one action left') : 'two actions this turn'}</Text>
+        <Text style={styles.slotHint}>{anySpent ? (moved && used ? '' : 'one action left') : 'two actions, or skip'}</Text>
       </View>
       {DIRS.map(b => <PaperButton key={b.dir} label={b.glyph} big style={styles.quarter} disabled={moved} onPress={() => move(b.dx, b.dy)} />)}
       <PaperButton label={locked ? '🔒 locked' : used ? '✓ used' : `${d.ability1Short} · ${d.ability1Cost} 🔆`} style={styles.half} disabled={!can1} onPress={() => ability(1)} />
-      <PaperButton label={locked ? '🔒 locked' : used ? '✓ used' : `${d.ability2Short} · 3 🔆`} style={styles.half}
+      <PaperButton label={locked ? '🔒 locked' : used ? '✓ used' : `${d.ability2Short} · ${d.ability2Cost} 🔆`} style={styles.half}
         variant={can3 ? 'highlight' : 'outline'} disabled={!can3} onPress={() => ability(3)} />
       {game.encasedCount > 0 && <PaperButton label={`🪟 Shatter (${game.encasedCount})`} variant="primary" style={game.heldSpear === null ? styles.wide : styles.half} disabled={used} onPress={shatter} />}
       {game.heldSpear !== null && <PaperButton label={`💠 Throw (${game.heldSpear})`} variant="primary" style={game.encasedCount === 0 ? styles.wide : styles.half} disabled={used} onPress={beginThrow} />}
-      <PaperButton label={anySpent ? 'End turn ▸' : 'Skip turn ▸'} variant={anySpent ? 'primary' : 'muted'} style={styles.wide} onPress={passTurn} />
+      {/* Always live: a turn can be passed with nothing spent. Muted here read as disabled. */}
+      <PaperButton label={anySpent ? 'End turn ▸' : 'Skip turn ▸'} variant={anySpent ? 'primary' : 'outline'} style={styles.wide} onPress={passTurn} />
     </View>
   );
 }

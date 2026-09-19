@@ -39,7 +39,10 @@ export const theme = {
   tileLight: '#fdfcf7',
   tileDark: '#f3efe4',
   tileBorder: '#8b95a7',
-  voidFill: '#e2dac5',
+  voidFill: '#0b1020',
+  voidBorder: '#2a3347',
+  voidStar: '#eaf1ff',
+  voidStarWarm: '#f4dd6d',
   chamberTop: '#fbf8ef',
   boardShadow: '#d9d2c0',
 

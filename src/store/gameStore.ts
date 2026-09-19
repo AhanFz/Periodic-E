@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Game } from '@/game/engine';
-import type { Direction, ElementKey, HutItem, Orientation } from '@/game/types';
+import { playCues, setHapticsEnabled } from '@/ui/haptics';
+import type { Direction, ElementKey, HutItem, InspectTarget, Orientation } from '@/game/types';
 
 type Screen = 'menu' | 'game' | 'over';
 
@@ -9,6 +10,10 @@ interface GameStore {
   game: Game | null;
   tick: number;
   pendingMove: { dx: number; dy: number } | null;
+  /** Long-press inspection card. Purely a view: it costs no turn and pauses nothing. */
+  inspecting: InspectTarget | null;
+  paused: boolean;
+  hapticsOn: boolean;
 
   startGame: (element: ElementKey) => void;
   retry: () => void;
@@ -26,37 +31,60 @@ interface GameStore {
   beginThrow: () => void;
   buy: (item: HutItem) => void;
   leaveHut: () => void;
+
+  inspect: (target: InspectTarget) => void;
+  closeInspect: () => void;
+  pause: () => void;
+  resume: () => void;
+  toggleHaptics: () => void;
 }
 
 export const useGameStore = create<GameStore>((set, get) => {
+  /** Hands the engine's cues to the device, then clears them so they play exactly once. */
+  const drainHaptics = (g: Game) => {
+    if (g.hapticCues.length === 0) return;
+    playCues(g.hapticCues);
+    g.hapticCues = [];
+  };
+
   const commit = (fn: (g: Game) => void) => {
     const g = get().game;
     if (!g) return;
     fn(g);
+    drainHaptics(g);
     set(s => ({ tick: s.tick + 1, screen: g.gameOver ? 'over' : s.screen }));
   };
+
+  const fresh = (element: ElementKey) => ({
+    game: new Game(element), screen: 'game' as Screen, tick: 0,
+    pendingMove: null, inspecting: null, paused: false,
+  });
 
   return {
     screen: 'menu',
     game: null,
     tick: 0,
     pendingMove: null,
+    inspecting: null,
+    paused: false,
+    hapticsOn: true,
 
-    startGame: (element) => set({ game: new Game(element), screen: 'game', tick: 0, pendingMove: null }),
-    retry: () => set({ game: new Game('hydrogen'), screen: 'game', tick: 0, pendingMove: null }),
-    toMenu: () => set({ screen: 'menu', game: null, pendingMove: null }),
+    startGame: (element) => set(fresh(element)),
+    retry: () => set(fresh('hydrogen')),
+    toMenu: () => set({ screen: 'menu', game: null, pendingMove: null, inspecting: null, paused: false }),
 
     move: (dx, dy) => {
       const g = get().game;
       if (!g) return;
       const res = g.movePlayer(dx, dy);
       if (res.needsConfirm) { set({ pendingMove: { dx, dy } }); return; }
+      drainHaptics(g);
       set(s => ({ tick: s.tick + 1, screen: g.gameOver ? 'over' : s.screen }));
     },
     confirmPendingMove: () => {
       const pm = get().pendingMove;
       set({ pendingMove: null });
-      if (pm) commit(g => g.movePlayer(pm.dx, pm.dy, true));
+      if (pm) commit(g => { g.movePlayer(pm.dx, pm.dy, true); });
     },
     cancelPendingMove: () => {
       set({ pendingMove: null });
@@ -72,5 +100,15 @@ export const useGameStore = create<GameStore>((set, get) => {
     beginThrow: () => commit(g => g.beginThrow()),
     buy: (item) => commit(g => g.buy(item)),
     leaveHut: () => commit(g => g.leaveHut()),
+
+    inspect: (target) => set({ inspecting: target }),
+    closeInspect: () => set({ inspecting: null }),
+    pause: () => set({ paused: true }),
+    resume: () => set({ paused: false }),
+    toggleHaptics: () => {
+      const on = !get().hapticsOn;
+      setHapticsEnabled(on);
+      set({ hapticsOn: on });
+    },
   };
 });

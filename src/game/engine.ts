@@ -1,5 +1,6 @@
 import {
-  CATALYST_PRICE, DASH_DAMAGE, ELEMENTS, ENCASE_TURNS, ENEMIES, EVOLUTION_CHAIN, EVOLVE_BASE_PRICE, EVOLVE_MIN_PRICE,
+  BATTERY_PAYOUT, BATTERY_TURNS, CATALYST_PRICE, DASH_DAMAGE, DOPANT_TRAP_DAMAGE, ELEMENTS, ENCASE_TURNS, ENEMIES,
+  EVOLUTION_CHAIN, EVOLVE_BASE_PRICE, EVOLVE_MIN_PRICE, ION_BEAM_DAMAGE,
   FLEE_ROUNDS, HEAL_AMOUNT, HEAL_PRICE, INITIAL_ENEMIES, MAX_DOPANT_TRAPS, MAX_ENCASED, MAX_ENEMIES,
   OZONE_FAR_DAMAGE, OZONE_NEAR_DAMAGE, PHOTON_CAP, POLARITY_CYCLE, RAM_COST, RAM_DAMAGE, SHEET_TURNS,
   SPEAR_DAMAGE, SPEAR_HEALTH, SPEAR_HIT_COST, SPEAR_RANGE, START_PHOTONS, TETHER_TURNS,
@@ -7,7 +8,7 @@ import {
 import { floodFill, generateGrid } from './grid';
 import type {
   AimTag, Direction, DopantTrap, ElementKey, Enemy, EnemyType, Fx, FxType, GridLayout, GroundedSpear,
-  HutItem, MessageType, MoveResult, Orientation, PendingWave, PoisonZone, Polarity, Pos, Scorched, Sheet, Trail,
+  HapticCue, HutItem, MessageType, MoveResult, Orientation, PendingWave, PoisonZone, Polarity, Pos, Scorched, Sheet, Trail,
 } from './types';
 
 const CARDINAL: Array<[number, number]> = [[0, -1], [0, 1], [-1, 0], [1, 0]];
@@ -52,6 +53,8 @@ export class Game {
   poisonImmune = false;
   abilityLockedTurns = 0;
   playerPoisonTurns = 0;
+  /** Lithium's Battery: turns of charge left. It shorts out the moment you lose health. */
+  batteryTurnsLeft = 0;
   telegraphTiles: Pos[] = [];
   poisonZones: PoisonZone[] = [];
   scorchedTiles: Scorched[] = [];
@@ -72,12 +75,22 @@ export class Game {
   message = 'Reach the hut to evolve. Reach the hatch to move on.';
   messageType: MessageType = 'info';
   pendingEffects: Fx[] = [];
+  /**
+   * Physical feedback for what just happened, drained by the UI after every action.
+   * Capped because a headless caller (the simulator) never drains it.
+   */
+  hapticCues: HapticCue[] = [];
   aiming = false;
   aimingFor: AimTag | null = null;
   aimDirection: Direction | null = null;
   aimLine: Pos[] = [];
   /** Set when the player lands on the hut; UI shows the shop until cleared. */
   atHut = false;
+  /**
+   * True only while the player is on the first turn of a grid, including a grid just entered
+   * through the hatch. The board rings the tile they arrived on, then stops.
+   */
+  showStartMarker = true;
 
   constructor(element: ElementKey = 'hydrogen') {
     this.currentElement = element;
@@ -99,6 +112,11 @@ export class Game {
   }
   get encasedCount() { return this.enemies.filter(e => e.encasedTurnsLeft > 0).length; }
 
+  /** Photon price of a tier for the current element. Both tiers are per-element data. */
+  abilityCost(tier: 1 | 3) { return tier === 1 ? this.elementData.ability1Cost : this.elementData.ability2Cost; }
+  private spendPhotons(tier: 1 | 3) { this.photons -= this.abilityCost(tier); }
+  private cue(c: HapticCue) { if (this.hapticCues.length < 16) this.hapticCues.push(c); }
+
   // =====================================================================
   // Grid lifecycle
   // =====================================================================
@@ -115,6 +133,7 @@ export class Game {
     this.poisonImmune = false;
     this.abilityLockedTurns = 0;
     this.playerPoisonTurns = 0;
+    this.batteryTurnsLeft = 0;
     this.telegraphTiles = [];
     this.poisonZones = [];
     this.scorchedTiles = [];
@@ -129,6 +148,7 @@ export class Game {
     this.usedAbilityThisTurn = false;
     this.clearAim();
     this.atHut = false;
+    this.showStartMarker = true;
 
     for (let i = 0; i < INITIAL_ENEMIES; i++) this.spawnEnemy();
     const p = this.randomFreeTile(2);
@@ -140,12 +160,13 @@ export class Game {
     if (this.currentElement === 'neon') {
       this.gameOver = true;
       this.won = true;
+      this.cue('win');
       this.setMessage(`Full clear! Escaped as Neon after ${this.gridsCleared} grids and ${this.totalKills} kills.`, 'success');
       return;
     }
     this.depth++;
     this.enterGrid();
-    this.setMessage(`Grid ${this.depth}: ${this.layout.shape}${this.polarity.active ? ', polarity active' : ''}. Hut and hatch are somewhere on the board.`, 'info');
+    this.setMessage(`Grid ${this.depth}: ${this.layout.shape}${this.polarity.active ? ', polarity active' : ''}. You are on the ringed tile; the hut and hatch are somewhere on the board.`, 'info');
   }
 
   // =====================================================================
@@ -215,12 +236,17 @@ export class Game {
       remaining -= absorbed;
       if (this.shieldPoints === 0) this.poisonImmune = false;
     }
-    if (remaining > 0) this.elementHealth -= remaining;
+    if (remaining > 0) {
+      this.elementHealth -= remaining;
+      this.cue('damage');
+      if (this.batteryTurnsLeft > 0) { this.batteryTurnsLeft = 0; this.note('🔋 The charge shorted out'); }
+    } else if (amount > 0) this.cue('shielded');
   }
   private die(reason: string) {
     if (this.elementHealth > 0) return;
     this.gameOver = true;
     this.won = false;
+    this.cue('death');
     this.setMessage(reason, 'danger');
   }
   private shieldSuffix() { return this.shieldPoints > 0 ? ` 🛡️${this.shieldPoints}` : ''; }
@@ -235,6 +261,7 @@ export class Game {
   /** Remove an enemy and pay out. Molecules pay double. */
   private killEnemy(e: Enemy, credited = true) {
     this.enemies = this.enemies.filter(x => x !== e);
+    this.cue('kill');
     if (!credited) return;
     const mult = e.bonded ? 2 : 1;
     this.stageKills += mult;
@@ -244,6 +271,7 @@ export class Game {
   private damageEnemy(e: Enemy, amount: number): boolean {
     e.health -= amount;
     if (e.health <= 0) { this.killEnemy(e); return true; }
+    this.cue('hit');
     return false;
   }
   private dmg(base: number) { return base + this.damageBonus; }
@@ -280,11 +308,13 @@ export class Game {
     if (this.abilityLockedTurns > 0) this.abilityLockedTurns--;
     this.turn++;
     this.turnsOnGrid++;
+    this.showStartMarker = false;
     this.enemyPhase = true;
     this.tickPolarity();
     if (!this.gameOver) this.moveEnemies();
     if (!this.gameOver) this.tickPlayerStatus();
     if (!this.gameOver) this.spawnPressure();
+    if (!this.gameOver) this.tickBattery();
     this.enemyPhase = false;
     this.movedThisTurn = false;
     this.usedAbilityThisTurn = false;
@@ -296,6 +326,17 @@ export class Game {
       this.note(`⚠️ Unstable! Turn limit exceeded (-1). Health ${this.elementHealth}`);
       this.die('Destabilised — the noble gas ran out of time.');
     }
+  }
+
+  /** Runs last in the turn: by now anything that could have shorted the charge has resolved. */
+  private tickBattery() {
+    if (this.batteryTurnsLeft <= 0) return;
+    this.batteryTurnsLeft--;
+    if (this.batteryTurnsLeft > 0) return;
+    this.gainPhotons(BATTERY_PAYOUT);
+    this.addFx('photon', this.playerPos.x, this.playerPos.y);
+    this.cue('photon');
+    this.note(`🔋 Battery discharged: +${BATTERY_PAYOUT} photons (${this.photons}/${PHOTON_CAP})`);
   }
 
   private spawnPressure() {
@@ -315,11 +356,12 @@ export class Game {
 
   movePlayer(dx: number, dy: number, force = false): MoveResult {
     if (this.gameOver || this.aiming) return { needsConfirm: false };
-    if (this.movedThisTurn) { this.setMessage('👣 Already moved this turn. Use an ability or end the turn.', 'warning'); return { needsConfirm: false }; }
+    if (this.movedThisTurn) { this.cue('blocked'); this.setMessage('👣 Already moved this turn. Use an ability or end the turn.', 'warning'); return { needsConfirm: false }; }
     const nx = this.playerPos.x + dx, ny = this.playerPos.y + dy;
     if (!this.isPassable(nx, ny)) return { needsConfirm: false };
     const target = this.enemyAt(nx, ny);
     if (!target && !this.playerCanEnter(nx, ny)) {
+      this.cue('blocked');
       this.setMessage('🔥 Scorched ground blocks your path.', 'warning');
       return { needsConfirm: false };
     }
@@ -352,6 +394,7 @@ export class Game {
       return;
     }
     const free = this.currentElement === 'beryllium' && this.shieldPoints > 0;
+    this.cue('ram');
     if (!free) this.damagePlayer(RAM_COST);
     this.addFx('crush', at.x, at.y);
     if (e.type === 'fluorine') { e.armed = false; e.explodeTiles = []; }
@@ -372,7 +415,7 @@ export class Game {
   private onPlayerArrive() {
     const p = this.playerPos;
     const pi = this.photonTiles.findIndex(t => same(t, p));
-    if (pi !== -1) { this.photonTiles.splice(pi, 1); this.gainPhotons(1); this.addFx('photon', p.x, p.y); this.setMessage(`🔆 Photon absorbed (${this.photons}/${PHOTON_CAP})`, 'success'); }
+    if (pi !== -1) { this.photonTiles.splice(pi, 1); this.gainPhotons(1); this.addFx('photon', p.x, p.y); this.cue('photon'); this.setMessage(`🔆 Photon absorbed (${this.photons}/${PHOTON_CAP})`, 'success'); }
     if (this.groundedSpear && same(this.groundedSpear, p)) {
       this.heldSpear = this.groundedSpear.health;
       this.groundedSpear = null;
@@ -430,17 +473,16 @@ export class Game {
 
   activateAbility(tier: 1 | 3) {
     if (this.gameOver || this.aiming) return;
-    if (this.usedAbilityThisTurn) { this.setMessage('🔆 Ability already used this turn. Move or end the turn.', 'warning'); return; }
-    const cost = tier === 1 ? this.elementData.ability1Cost : 3;
-    if (this.photons < cost) return;
-    if (this.abilityLockedTurns > 0) { this.setMessage('🔒 Abilities locked this turn.', 'warning'); return; }
+    if (this.usedAbilityThisTurn) { this.cue('blocked'); this.setMessage('🔆 Ability already used this turn. Move or end the turn.', 'warning'); return; }
+    if (this.photons < this.abilityCost(tier)) { this.cue('blocked'); return; }
+    if (this.abilityLockedTurns > 0) { this.cue('blocked'); this.setMessage('🔒 Abilities locked this turn.', 'warning'); return; }
     this.pendingEffects = [];
     this.atHut = false;
 
     switch (this.currentElement) {
       case 'hydrogen': if (tier === 1) this.beginAim('h_bond', 'Choose an adjacent enemy to tether.'); else this.beginAim('h_dash', 'Choose a direction to dash.'); break;
       case 'helium': this.heliumFreeze(tier); break;
-      case 'lithium': this.beginAim(tier === 1 ? 'li_paralyze' : 'li_burst3', 'Choose a direction to fire.'); break;
+      case 'lithium': if (tier === 1) this.lithiumBattery(); else this.beginAim('li_beam', 'Choose a direction to fire. The beam crosses voids.'); break;
       case 'beryllium': this.berylliumShield(tier); break;
       case 'boron': if (tier === 1) this.boronTrap(); else this.beginAim('b_encase', 'Choose an adjacent enemy to encase.'); break;
       case 'carbon': if (tier === 1) this.beginAim('c_sheet', 'Choose an edge or void to bridge.'); else this.carbonForgeSpear(); break;
@@ -490,8 +532,8 @@ export class Game {
     const d = DIR_DELTA[direction];
     const p = this.playerPos;
     switch (this.aimingFor) {
-      case 'li_paralyze': case 'li_burst3':
-        this.aimLine = this.lineFrom(p, d); break;
+      case 'li_beam':
+        this.aimLine = this.lineAcross(p, d); break;
       case 'c_throw':
         this.aimLine = this.lineFrom(p, d).slice(0, SPEAR_RANGE); break;
       case 'h_dash': case 'n_blast2':
@@ -512,6 +554,13 @@ export class Game {
     while (this.isPassable(x, y)) { out.push({ x, y }); x += d.x; y += d.y; }
     return out;
   }
+  /** Like `lineFrom`, but a void never stops it: it runs to the far edge of the grid. */
+  private lineAcross(from: Pos, d: Pos): Pos[] {
+    const out: Pos[] = [];
+    let x = from.x + d.x, y = from.y + d.y;
+    while (this.inBounds(x, y) || this.hasSheet(x, y)) { out.push({ x, y }); x += d.x; y += d.y; }
+    return out;
+  }
 
   /** Aiming spends the ability slot only here, on a successful resolution — cancelling costs nothing. */
   confirmAim(orientation: Orientation = 'left') {
@@ -519,7 +568,7 @@ export class Game {
     switch (this.aimingFor) {
       case 'h_bond': this.doTether(); break;
       case 'h_dash': this.doDash(); break;
-      case 'li_paralyze': case 'li_burst3': this.doRay(); break;
+      case 'li_beam': this.doBeam(); break;
       case 'b_encase': this.doEncase(); break;
       case 'c_sheet': this.doSheet(orientation); break;
       case 'c_throw': this.doThrow(); break;
@@ -540,7 +589,7 @@ export class Game {
       return;
     }
     this.pendingEffects = [];
-    this.photons -= 1;
+    this.spendPhotons(1);
     e.tetherTurnsLeft = TETHER_TURNS;
     e.armed = false; e.explodeTiles = [];
     e.telegraph = false; e.telegraphTiles = [];
@@ -556,7 +605,7 @@ export class Game {
     const line = this.aimLine;
     this.clearAim();
     this.pendingEffects = [];
-    this.photons -= 3;
+    this.spendPhotons(3);
     let hits = 0, kills = 0;
     const seen = new Set<number>();
     for (const t of line) {
@@ -594,7 +643,7 @@ export class Game {
     const deltas = tier === 1 ? CARDINAL : ALL_EIGHT;
     const targets = this.enemies.filter(e => deltas.some(([dx, dy]) => this.enemyTiles(e).some(t => t.x === this.playerPos.x + dx && t.y === this.playerPos.y + dy)));
     if (!targets.length) { this.setMessage(`❄️ Nothing in the ${tier === 1 ? 4 : 8} tiles around you.`, 'warning'); return; }
-    this.photons -= tier === 1 ? 1 : 3;
+    this.spendPhotons(tier);
     for (const e of targets) { e.frozenTurnsLeft = tier === 1 ? 2 : 3; for (const t of this.enemyTiles(e)) this.addFx('frost', t.x, t.y); }
     this.setMessage(`❄️ Froze ${targets.length} target${targets.length === 1 ? '' : 's'}. Walk into a frozen body to shatter it.`, 'success');
     this.spendAbilitySlot();
@@ -602,7 +651,7 @@ export class Game {
 
   // ---- Beryllium ----
   private berylliumShield(tier: 1 | 3) {
-    this.photons -= tier === 1 ? this.elementData.ability1Cost : 3;
+    this.spendPhotons(tier);
     this.shieldPoints = tier === 1 ? 2 : 3;
     this.poisonImmune = tier === 3;
     this.addFx('shield', this.playerPos.x, this.playerPos.y);
@@ -611,30 +660,40 @@ export class Game {
   }
 
   // ---- Lithium ----
-  private doRay() {
-    const line = this.aimLine, burst = this.aimingFor === 'li_burst3';
+  /** A cell that pays out only if you keep clear of damage while it charges. */
+  private lithiumBattery() {
+    if (this.batteryTurnsLeft > 0) { this.cue('blocked'); this.setMessage('🔋 A cell is already charging.', 'warning'); return; }
+    if (this.photons >= PHOTON_CAP) { this.cue('blocked'); this.setMessage('🔋 Photon store is full — nowhere to put the charge.', 'warning'); return; }
+    this.spendPhotons(1);
+    this.batteryTurnsLeft = BATTERY_TURNS;
+    this.addFx('shock', this.playerPos.x, this.playerPos.y);
+    this.setMessage(`🔋 Charging for ${BATTERY_TURNS} turns. Take no damage and it pays ${BATTERY_PAYOUT} photons. Any hit shorts it.`, 'success');
+    this.spendAbilitySlot();
+  }
+
+  /** Crosses voids and off-grid gaps: everything in the direction takes damage and loses its turn. */
+  private doBeam() {
+    const line = this.aimLine;
     this.clearAim();
     this.pendingEffects = [];
-    this.photons -= burst ? 3 : 1;
+    this.spendPhotons(3);
     let killed = 0, paralyzed = 0, resisted = 0;
     const seen = new Set<number>();
     for (const t of line) {
+      this.addFx('shock', t.x, t.y);
       const e = this.enemyAt(t.x, t.y);
       if (!e || seen.has(e.id)) continue;
       seen.add(e.id);
-      this.addFx('shock', t.x, t.y);
+      // Bromine conducts poorly: it takes a single point and keeps its turn.
       if (e.type === 'bromine') { resisted++; if (this.damageEnemy(e, 1)) killed++; continue; }
-      if (burst) {
-        if (this.damageEnemy(e, this.dmg(3))) { this.addFx('explosion', t.x, t.y); killed++; }
-        else { e.paralyzed = true; paralyzed++; }
-      } else if (e.paralyzed) { this.killEnemy(e); killed++; }
+      if (this.damageEnemy(e, this.dmg(ION_BEAM_DAMAGE))) { this.addFx('explosion', t.x, t.y); killed++; }
       else { e.paralyzed = true; paralyzed++; }
     }
-    let msg = burst ? '💥 Burst.' : '⚡ Ray.';
+    let msg = '⚡ Ion beam.';
     if (killed) msg += ` ${killed} destroyed.`;
     if (paralyzed) msg += ` ${paralyzed} paralyzed.`;
     if (resisted) msg += ' Bromine resisted (1 dmg).';
-    if (!killed && !paralyzed && !resisted) msg += ' Nothing in range.';
+    if (!killed && !paralyzed && !resisted) msg += ' It lit up the whole line and hit nothing.';
     this.setMessage(msg, killed || paralyzed ? 'success' : 'info');
     this.spendAbilitySlot();
   }
@@ -643,7 +702,7 @@ export class Game {
   private boronTrap() {
     if (this.dopantTraps.length >= MAX_DOPANT_TRAPS) { this.setMessage(`⚡ Max ${MAX_DOPANT_TRAPS} traps already placed.`, 'warning'); return; }
     if (this.dopantTraps.some(t => same(t, this.playerPos))) { this.setMessage('⚡ A trap is already here.', 'warning'); return; }
-    this.photons -= 1;
+    this.spendPhotons(1);
     this.dopantTraps.push({ x: this.playerPos.x, y: this.playerPos.y, turnsLeft: 3 });
     this.addFx('shock', this.playerPos.x, this.playerPos.y);
     this.setMessage('⚡ Dopant trap set under your feet. Step off and let them chase.', 'success');
@@ -658,7 +717,7 @@ export class Game {
     if (e.encasedTurnsLeft > 0) { this.setMessage('🪟 Already encased.', 'warning'); return; }
     if (this.encasedCount >= MAX_ENCASED) { this.setMessage(`🪟 Only ${MAX_ENCASED} can be encased at once.`, 'warning'); return; }
     this.pendingEffects = [];
-    this.photons -= 3;
+    this.spendPhotons(3);
     e.encasedTurnsLeft = ENCASE_TURNS;
     e.armed = false; e.telegraph = false; e.bondingWith = null; e.tetherTurnsLeft = 0;
     this.addFx('encase', t.x, t.y);
@@ -676,7 +735,7 @@ export class Game {
     const valid = tiles.filter(t => !this.isPassable(t.x, t.y) && !this.sheetTooFar(t));
     if (valid.length === 0) { this.setMessage('🕸️ Nowhere to build there.', 'warning'); return; }
     this.pendingEffects = [];
-    this.photons -= 1;
+    this.spendPhotons(1);
     this.sheets.push({ tiles: valid, turnsLeft: SHEET_TURNS });
     for (const t of valid) this.addFx('bond', t.x, t.y);
     this.setMessage(`🕸️ Graphene sheet laid (${valid.length} tiles). Collapses in ${SHEET_TURNS} turns.`, 'success');
@@ -684,7 +743,7 @@ export class Game {
   }
   private carbonForgeSpear() {
     if (this.heldSpear !== null) { this.setMessage('💠 You already hold a spear. Throw it first.', 'warning'); return; }
-    this.photons -= 3;
+    this.spendPhotons(3);
     this.heldSpear = SPEAR_HEALTH;
     this.addFx('spear', this.playerPos.x, this.playerPos.y);
     this.setMessage('💠 Diamond spear forged. Throwing is free.', 'success');
@@ -732,7 +791,7 @@ export class Game {
     const line = this.aimLine;
     this.clearAim();
     this.pendingEffects = [];
-    this.photons -= 1;
+    this.spendPhotons(1);
     let kills = 0;
     const seen = new Set<number>();
     for (const t of line) { const e = this.enemyAt(t.x, t.y); if (e && seen.has(e.id)) { this.addFx('explosion', t.x, t.y); continue; } if (e) seen.add(e.id); if (this.blastTile(t.x, t.y)) kills++; }
@@ -741,7 +800,7 @@ export class Game {
   }
   private nitrogenBlast4() {
     this.pendingEffects = [];
-    this.photons -= 3;
+    this.spendPhotons(3);
     let kills = 0;
     const seen = new Set<number>();
     for (const [dx, dy] of CARDINAL) {
@@ -759,7 +818,7 @@ export class Game {
   // ---- Oxygen ----
   private oxygenHeal() {
     if (this.elementHealth >= this.maxHealth) { this.setMessage('💧 Already at full health.', 'info'); return; }
-    this.photons -= 1;
+    this.spendPhotons(1);
     this.elementHealth = Math.min(this.maxHealth, this.elementHealth + 1);
     this.addFx('heal', this.playerPos.x, this.playerPos.y);
     this.setMessage(`💚 Healed. Health ${this.elementHealth}/${this.maxHealth}`, 'success');
@@ -767,7 +826,7 @@ export class Game {
   }
   private ozoneLayer() {
     this.pendingEffects = [];
-    this.photons -= 3;
+    this.spendPhotons(3);
     const { x: cx, y: cy } = this.playerPos;
     let kills = 0;
     const seen = new Set<number>();
@@ -786,7 +845,7 @@ export class Game {
     const around = () => this.enemies.filter(e => ALL_EIGHT.some(([dx, dy]) => this.enemyTiles(e).some(t => t.x === this.playerPos.x + dx && t.y === this.playerPos.y + dy)));
     const targets = around();
     if (!targets.length) { this.setMessage('✨ No enemy adjacent to blind.', 'warning'); return; }
-    this.photons -= 1;
+    this.spendPhotons(1);
     for (const e of targets) if (e.bonded) this.breakBond(e);
     const again = around();
     for (const e of again) { e.fleeTurnsLeft = FLEE_ROUNDS; this.planMove(e); for (const t of this.enemyTiles(e)) this.addFx('flash', t.x, t.y); }
@@ -796,7 +855,7 @@ export class Game {
   private allOutFlash() {
     if (!this.enemies.length) { this.setMessage('✨ Nothing on the grid to freeze.', 'info'); return; }
     this.pendingEffects = [];
-    this.photons -= 3;
+    this.spendPhotons(3);
     let kills = 0;
     for (const e of [...this.enemies]) {
       for (const t of this.enemyTiles(e)) this.addFx('frost', t.x, t.y);
@@ -827,6 +886,7 @@ export class Game {
     const price = this.hutPrice(item)!;
     this.photons -= price;
     this.pendingEffects = [];
+    if (item !== 'evolve') this.cue('buy');
     switch (item) {
       case 'evolve': this.evolve(); break;
       case 'heal':
@@ -852,8 +912,10 @@ export class Game {
   private evolve() {
     const next = EVOLUTION_CHAIN[this.currentElement];
     if (!next) return;
+    const gained = ELEMENTS[next].health - ELEMENTS[this.currentElement].health;
     this.currentElement = next;
     this.elementsVisited.push(next);
+    this.cue('evolve');
     this.elementHealth = this.maxHealth;
     this.photons = Math.max(this.photons, START_PHOTONS);
     this.stageKills = 0;
@@ -861,9 +923,14 @@ export class Game {
     this.shieldPoints = 0;
     this.poisonImmune = false;
     this.abilityLockedTurns = 0;
+    this.batteryTurnsLeft = 0;
     this.pendingWave = null;
     this.addFx('evolve', this.playerPos.x, this.playerPos.y);
-    this.setMessage(`🌟 Evolved into ${ELEMENTS[next].symbol}! Full health.${this.isNoble ? ` Turn limit: ${this.turnLimit}.` : ''}`, 'success');
+    this.setMessage(
+      `🌟 Evolved into ${ELEMENTS[next].symbol}! Full health${gained > 0 ? `, +${gained} max from the heavier nucleus` : ''} (${this.maxHealth}).`
+      + `${this.isNoble ? ` Turn limit: ${this.turnLimit}.` : ''}`,
+      'success',
+    );
   }
 
   // =====================================================================
@@ -1167,8 +1234,14 @@ export class Game {
       this.addFx('shock', trap.x, trap.y);
       if (e.type === 'bromine') {
         e.suppressedTurns = 1;
-        this.note('⚡ Bromine took the trap (1 dmg, not paralyzed, corrosion dulled for a turn)');
-        this.damageEnemy(e, 1);
+        const burnt = this.damageEnemy(e, this.dmg(DOPANT_TRAP_DAMAGE));
+        this.note(burnt
+          ? '⚡ Bromine burned out on a dopant trap'
+          : `⚡ Bromine took the trap (-${this.dmg(DOPANT_TRAP_DAMAGE)}, not paralyzed, corrosion dulled for a turn)`);
+        continue;
+      }
+      if (this.damageEnemy(e, this.dmg(DOPANT_TRAP_DAMAGE))) {
+        this.note(`⚡ ${ENEMIES[e.type].symbol} burned out on a dopant trap`);
         continue;
       }
       // Paralyzed and stripped of its special for the turn: no arming, channelling or vanishing.

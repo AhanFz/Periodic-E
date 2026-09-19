@@ -1,11 +1,19 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Atom } from './Atom';
 import { FxBurst } from './FxBurst';
+import { VoidCell } from './VoidCell';
 import { fonts, theme } from '../theme';
 import type { TileView, TileTint } from '@/game/view';
+import type { InspectTarget } from '@/game/types';
 
-interface Props { tile: TileView; size: number; tick: number; }
+interface Props {
+  tile: TileView;
+  size: number;
+  tick: number;
+  /** Long press on an atom opens its card. Undefined leaves the tile inert. */
+  onInspect?: (target: InspectTarget) => void;
+}
 
 function resolveTint(tints: TileTint[], checker: 'light' | 'dark') {
   let bg: string = checker === 'light' ? theme.tileLight : theme.tileDark;
@@ -19,7 +27,18 @@ function resolveTint(tints: TileTint[], checker: 'light' | 'dark') {
   return { bg, border, dashed };
 }
 
-export function Tile({ tile, size, tick }: Props) {
+export function Tile({ tile, size, tick, onInspect }: Props) {
+  const glow = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!tile.startGlow) { glow.setValue(0); return; }
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(glow, { toValue: 1, duration: 750, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      Animated.timing(glow, { toValue: 0, duration: 750, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [tile.startGlow, glow]);
+
   const pulse = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (!tile.pulse) { pulse.setValue(0); return; }
@@ -32,8 +51,16 @@ export function Tile({ tile, size, tick }: Props) {
   }, [tile.pulse, pulse]);
 
   // Off-grid margin: blank paper so the ruled lines continue. Void: a shaded region.
+  // Effects still draw here, so a beam that crosses a void reads as one unbroken line.
   if (!tile.exists) {
-    return <View style={[{ width: size, height: size }, tile.isVoid ? styles.voidCell : styles.marginCell]} />;
+    const over = (
+      <>
+        {tile.threatIcon === '🎯' && <Text style={[styles.overIcon, { fontSize: size * 0.3 }]}>🎯</Text>}
+        {tile.fx.map((f, i) => <FxBurst key={`${tick}-${i}`} type={f.type} size={size} />)}
+      </>
+    );
+    if (tile.isVoid) return <VoidCell size={size} x={tile.x} y={tile.y}>{over}</VoidCell>;
+    return <View style={[{ width: size, height: size }, styles.marginCell]}>{over}</View>;
   }
 
   const { bg, border, dashed } = resolveTint(tile.tints, tile.checker);
@@ -42,11 +69,33 @@ export function Tile({ tile, size, tick }: Props) {
   const atomSize = size * 0.72;
   const cornerSize = Math.max(10, Math.round(size * 0.2));
 
+  const target = tile.inspect;
+  const Cell = target && onInspect ? Pressable : View;
+  const cellProps = target && onInspect
+    ? {
+        onLongPress: () => onInspect(target),
+        delayLongPress: 280,
+        accessibilityRole: 'button' as const,
+        accessibilityHint: 'Hold for this atom\u2019s card',
+      }
+    : {};
+
   return (
-    <View style={[styles.cell, { width: size, height: size, backgroundColor: bg, borderColor: border, borderStyle: dashed ? 'dashed' : 'solid' }, isSheet && styles.sheetCell]}>
+    <Cell {...cellProps} style={[styles.cell, { width: size, height: size, backgroundColor: bg, borderColor: border, borderStyle: dashed ? 'dashed' : 'solid' }, isSheet && styles.sheetCell]}>
       {tile.pulse && <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: border, opacity: pulseOpacity }]} />}
+      {tile.startGlow && (
+        <>
+          <View pointerEvents="none" style={styles.startRingCore} />
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.startRing, {
+              opacity: glow.interpolate({ inputRange: [0, 1], outputRange: [0.25, 1] }),
+              transform: [{ scale: glow.interpolate({ inputRange: [0, 1], outputRange: [1, 1.1] }) }],
+            }]}
+          />
+        </>
+      )}
       <View style={styles.inner}>
-        {tile.isStart && <Text style={[styles.corner, styles.bl, { fontSize: cornerSize }]}>⬇️</Text>}
         {tile.isGhost && <Text style={[styles.corner, styles.br, { fontSize: cornerSize }]}>❓</Text>}
         {tile.sheetTimer !== null && <Text style={[styles.corner, styles.bl, styles.timer, { fontSize: cornerSize }]}>{tile.sheetTimer}</Text>}
         {tile.moveArrow && <Text style={[styles.corner, styles.tl, styles.arrow, { fontSize: cornerSize + 2 }]}>{tile.moveArrow}</Text>}
@@ -64,15 +113,17 @@ export function Tile({ tile, size, tick }: Props) {
 
         {tile.fx.map((f, i) => <FxBurst key={`${tick}-${i}`} type={f.type} size={size} />)}
       </View>
-    </View>
+    </Cell>
   );
 }
 
 const styles = StyleSheet.create({
   cell: { borderWidth: 1, borderRadius: 2, alignItems: 'center', justifyContent: 'center' },
   sheetCell: { borderStyle: 'dashed', borderWidth: 1.5 },
-  marginCell: { backgroundColor: theme.figureBg },
-  voidCell: { backgroundColor: theme.voidFill, borderWidth: 1, borderStyle: 'dotted', borderColor: theme.tileBorder },
+  marginCell: { backgroundColor: theme.figureBg, alignItems: 'center', justifyContent: 'center' },
+  startRingCore: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderWidth: 1.5, borderColor: theme.playerElectron, borderRadius: 2 },
+  startRing: { position: 'absolute', top: -3, left: -3, right: -3, bottom: -3, borderWidth: 2, borderColor: theme.playerElectron, borderRadius: 4 },
+  overIcon: { opacity: 0.75 },
   inner: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
   corner: { position: 'absolute', zIndex: 4 },
   tl: { top: 1, left: 3 }, tr: { top: 1, right: 3 }, bl: { bottom: 0, left: 3 }, br: { bottom: 0, right: 3 },
