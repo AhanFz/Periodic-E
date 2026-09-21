@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Caption, PaperButton, Rule, SectionLabel } from '../components/Print';
 import { fonts, theme } from '../theme';
-import { ATOMIC_MASS, ATOMIC_NUMBER, ELEMENTS, ELEMENT_COLORS, ELEMENT_NAMES, ELEMENT_ORDER } from '@/game/constants';
+import { ATOMIC_MASS, ATOMIC_NUMBER, ELEMENTS, ELEMENT_COLORS, ELEMENT_NAMES, ELEMENT_ORDER, LIGANDS, QUANTA_GLYPH } from '@/game/constants';
 import { useGameStore } from '@/store/gameStore';
 import type { ElementKey } from '@/game/types';
 
@@ -24,6 +24,9 @@ function ElementCell({ element, onPress }: { element: ElementKey; onPress: () =>
 
 export function LevelSelectScreen() {
   const startGame = useGameStore(s => s.startGame);
+  const toStore = useGameStore(s => s.toStore);
+  const profile = useGameStore(s => s.profile);
+  const equipped = profile.equippedLigand;
   return (
     <ScrollView contentContainerStyle={styles.wrap}>
       <SectionLabel style={styles.center}>An illustrated course in halogen survival</SectionLabel>
@@ -33,6 +36,16 @@ export function LevelSelectScreen() {
         Climb the periodic table from Hydrogen to Neon across a sequence of reaction chambers. Every halogen destroyed
         pays a photon; photons buy abilities and, at the isotope hut, your next element.
       </Text>
+
+      <View style={styles.ligandBar}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.ligandLabel}>Ligand equipped</Text>
+          <Text style={[styles.ligandName, !equipped && styles.ligandNone]}>
+            {equipped ? LIGANDS[equipped].name : 'None — running bare'}
+          </Text>
+        </View>
+        <PaperButton label={`Ligands · ${QUANTA_GLYPH} ${profile.quanta}`} variant="highlight" onPress={toStore} />
+      </View>
 
       <PaperButton label="Begin at Chapter 1 — Hydrogen" variant="primary" onPress={() => startGame('hydrogen')} style={styles.primary} />
 
@@ -51,6 +64,14 @@ const styles = StyleSheet.create({
   title: { fontFamily: fonts.serif, fontSize: 34, fontWeight: '700', color: theme.ink, textAlign: 'center', marginTop: 6 },
   lede: { fontFamily: fonts.serif, fontSize: 14, lineHeight: 21, color: theme.ink, textAlign: 'center', marginBottom: 18 },
   primary: { marginBottom: 26, paddingVertical: 14 },
+  ligandBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14,
+    borderTopWidth: 2, borderBottomWidth: 1, borderColor: theme.ink, backgroundColor: theme.panel,
+    paddingVertical: 9, paddingHorizontal: 12,
+  },
+  ligandLabel: { fontFamily: fonts.serif, fontSize: 9, letterSpacing: 1, textTransform: 'uppercase', color: theme.textDim },
+  ligandName: { fontFamily: fonts.serif, fontSize: 14, fontWeight: '700', color: theme.accent, marginTop: 2 },
+  ligandNone: { color: theme.textDim, fontWeight: '400', fontStyle: 'italic' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' },
   cell: { width: '30%', minWidth: 100, backgroundColor: theme.panel, borderWidth: 1, borderColor: theme.ink, paddingTop: 10, paddingBottom: 8, paddingHorizontal: 6, alignItems: 'center', overflow: 'hidden' },
   band: { position: 'absolute', top: 0, left: 0, right: 0, height: 5 },

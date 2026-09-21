@@ -1,7 +1,10 @@
 import { Game } from '../src/game/engine';
-import { ATOMIC_MASS, BATTERY_PAYOUT, BATTERY_TURNS, ELEMENTS, ELEMENT_ORDER, ENEMIES, PHOTON_CAP, healthForMass } from '../src/game/constants';
+import {
+  ATOMIC_MASS, BATTERY_PAYOUT, BATTERY_TURNS, ELEMENTS, ELEMENT_ORDER, ENEMIES, EXOTHERMIC_RAM_DAMAGE,
+  HUT_DISCOUNT, LIGANDS, LIGAND_ORDER, PASSIVATION_SHIELD, PHOTON_CAP, RAM_DAMAGE, healthForMass,
+} from '../src/game/constants';
 import { gridSizeFor } from '../src/game/grid';
-import type { Direction, ElementKey, Enemy, EnemyType, HutItem, Pos } from '../src/game/types';
+import type { Direction, ElementKey, Enemy, EnemyType, HutItem, LigandId, Pos } from '../src/game/types';
 
 const DIRS: Array<[number, number, Direction]> = [[0, -1, 'up'], [0, 1, 'down'], [-1, 0, 'left'], [1, 0, 'right']];
 const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
@@ -22,6 +25,18 @@ function assertInvariants(g: Game) {
   if (g.enemyAt(g.playerPos.x, g.playerPos.y)) throw new Error('enemy sharing the player tile');
   if (g.heldSpear !== null && g.heldSpear <= 0) throw new Error('held spear with no durability');
   if (g.batteryTurnsLeft < 0 || g.batteryTurnsLeft > BATTERY_TURNS) throw new Error('battery out of range ' + g.batteryTurnsLeft);
+  // Passivation's trigger is the one that can run away: a threshold test rather than an
+  // edge test re-arms itself every time the shield lets health settle back on the threshold.
+  if (g.passivationFiresThisGrid > 1) throw new Error('passivation fired ' + g.passivationFiresThisGrid + ' times on one grid');
+  if (g.supercooledFires > 1) throw new Error('supercooled fired ' + g.supercooledFires + ' times in a run');
+  if (g.passivationFiresThisGrid > 0 && g.ligand !== 'passivation') throw new Error('passivation fired without the ligand');
+  if (g.supercooledFires > 0 && g.ligand !== 'supercooled') throw new Error('supercooled fired without the ligand');
+  if (g.ramDamage !== RAM_DAMAGE && g.ramDamage !== EXOTHERMIC_RAM_DAMAGE) throw new Error('ram damage ' + g.ramDamage);
+  if (g.ramDamage === EXOTHERMIC_RAM_DAMAGE && g.ligand !== 'exothermic') throw new Error('boosted ram without the ligand');
+  for (const item of ['evolve', 'heal', 'healthCatalyst', 'damageCatalyst'] as HutItem[]) {
+    const price = g.hutPrice(item);
+    if (price !== null && price < 0) throw new Error('negative hut price for ' + item);
+  }
   if (g.polarity.active && !g.polarity.direction) throw new Error('polarity active without a direction');
   if (g.polarity.active && (g.polarity.countdown < 1 || g.polarity.countdown > 4)) throw new Error('polarity countdown out of range ' + g.polarity.countdown);
   if (g.groundedSpear && g.groundedSpear.health <= 0) throw new Error('grounded spear with no durability');
@@ -52,8 +67,8 @@ function mkEnemy(g: Game, type: EnemyType, x: number, y: number): Enemy {
   return e;
 }
 /** A fresh 5x5 plain grid with nothing on it; player at the left edge of the middle row. */
-function blank(element: ElementKey): Game {
-  const g = new Game(element);
+function blank(element: ElementKey, ligand: LigandId | null = null): Game {
+  const g = new Game(element, ligand);
   g.enemies = []; g.photonTiles = []; g.dopantTraps = []; g.scorchedTiles = [];
   g.layout.hut = { x: 4, y: 4 }; g.layout.hatch = { x: 4, y: 0 };
   g.playerPos = { x: 0, y: 2 };
@@ -288,6 +303,122 @@ function runScenarios() {
     g.passTurn();
     expect(g.turn === 1, 'skipped a turn with no move and no ability');
     expect(!g.movedThisTurn && !g.usedAbilityThisTurn, 'flags reset');
+  }
+  // Passivation Layer fires on entering the low-health state, once per grid, and never loops.
+  {
+    const g = blank('carbon', 'passivation');
+    g.enemies = [];
+    g.elementHealth = 4;
+    mkEnemy(g, 'iodine', 1, 2);
+    g.movePlayer(1, 0);
+    expect(g.elementHealth === 3, 'ram cost 1, got ' + g.elementHealth);
+    expect(g.shieldPoints === 0, 'still above the threshold, no skin yet');
+    g.movedThisTurn = false;
+    g.movePlayer(1, 0);
+    expect(g.elementHealth === 2, 'crossed into the low state, got ' + g.elementHealth);
+    expect(g.shieldPoints === PASSIVATION_SHIELD, 'skin formed, got ' + g.shieldPoints);
+    expect(g.passivationFiresThisGrid === 1, 'fired once');
+
+    // The edge test, not the once-per-grid flag, is what stops the loop: clear the flag and it
+    // still refuses to re-arm while health is already sitting at or below the threshold.
+    for (let i = 0; i < 6; i++) {
+      g.shieldPoints = 0;
+      g.elementHealth = 2;
+      g.passivationUsedThisGrid = false;
+      g.enemies = [];
+      mkEnemy(g, 'chlorine', g.playerPos.x + 1, g.playerPos.y);
+      g.movedThisTurn = false;
+      g.movePlayer(1, 0);
+      expect(g.elementHealth === 1, 'the ram landed, got ' + g.elementHealth);
+      expect(g.shieldPoints === 0, 'no skin while already at or below the threshold');
+    }
+    expect(g.passivationFiresThisGrid === 1, 'still exactly one fire, got ' + g.passivationFiresThisGrid);
+  }
+  // It re-arms on the next grid.
+  {
+    const g = blank('carbon', 'passivation');
+    g.passivationUsedThisGrid = true;
+    g.passivationFiresThisGrid = 1;
+    g.enemies = [];
+    g.playerPos = { x: 3, y: 0 };
+    g.movePlayer(1, 0);
+    expect(g.depth === 2, 'took the hatch');
+    expect(!g.passivationUsedThisGrid && g.passivationFiresThisGrid === 0, 'the new grid re-arms it');
+  }
+  // A killing blow does not hand out shield.
+  {
+    const g = blank('hydrogen', 'passivation');
+    g.enemies = [];
+    g.elementHealth = 1;
+    mkEnemy(g, 'iodine', 1, 2);
+    g.movePlayer(1, 0);
+    expect(g.gameOver && !g.won, 'the ram was lethal');
+    expect(g.shieldPoints === 0, 'no skin on death, got ' + g.shieldPoints);
+  }
+  // Supercooled Core holds a lethal blow at 1 and freezes the neighbours, once per run.
+  {
+    const g = blank('carbon', 'supercooled');
+    g.enemies = [];
+    g.elementHealth = 1;
+    const near = mkEnemy(g, 'iodine', 1, 2);
+    g.movePlayer(1, 0);
+    expect(!g.gameOver, 'the save kept the run alive');
+    expect(g.elementHealth === 1, 'held at 1, got ' + g.elementHealth);
+    expect(near.frozenTurnsLeft === 2, 'the neighbour froze, got ' + near.frozenTurnsLeft);
+    expect(g.ligandFlash !== null, 'the save raised a flash card');
+    expect(g.supercooledFires === 1, 'fired once');
+    g.elementHealth = 1;
+    g.movedThisTurn = false;
+    g.enemies = [];
+    mkEnemy(g, 'chlorine', g.playerPos.x + 1, g.playerPos.y);
+    g.movePlayer(1, 0);
+    expect(g.gameOver, 'the second lethal blow lands: one save per run');
+  }
+  // It deliberately cannot absorb the noble-gas timer.
+  {
+    const g = blank('helium', 'supercooled');
+    g.enemies = [];
+    g.elementHealth = 1;
+    g.turnsOnGrid = g.turnLimit! + 1;
+    g.passTurn();
+    expect(g.gameOver, 'destabilisation still kills');
+    expect(g.message.startsWith('Destabilised'), 'and for the right reason: ' + g.message);
+    expect(g.supercooledFires === 0, 'the save was never spent');
+  }
+  // Fractional Distillation discounts a grid's first hut visit only, and never below zero.
+  {
+    const g = blank('lithium', 'fractional');
+    g.enemies = [];
+    g.photons = 5;
+    expect(g.hutVisitsThisGrid === 0, 'no visit yet');
+    g.playerPos = { x: g.layout.hut.x - 1, y: g.layout.hut.y };
+    g.movePlayer(1, 0);
+    expect(g.atHut && g.hutVisitsThisGrid === 1, 'arrived at the hut');
+    expect(g.hutDiscount === HUT_DISCOUNT, 'first visit is discounted');
+    expect(g.hutPrice('heal') === g.basePrice('heal')! - HUT_DISCOUNT, 'heal is cheaper');
+    expect(g.hutPrice('evolve') === g.basePrice('evolve')! - HUT_DISCOUNT, 'evolution is cheaper too');
+    g.leaveHut();
+    g.movedThisTurn = false;
+    g.movePlayer(-1, 0);
+    g.movedThisTurn = false;
+    g.movePlayer(1, 0);
+    expect(g.hutVisitsThisGrid === 2, 'second visit counted, got ' + g.hutVisitsThisGrid);
+    expect(g.hutDiscount === 0, 'and is full price');
+    expect(g.hutPrice('heal') === g.basePrice('heal'), 'heal back to list price');
+  }
+  // Exothermic Edge only while at half health or below, and it never costs more to ram.
+  {
+    const g = blank('carbon', 'exothermic');
+    g.enemies = [];
+    expect(g.maxHealth === 8 && !g.exothermicActive, 'healthy carbon rams for 2');
+    expect(g.ramDamage === RAM_DAMAGE, 'base ram damage');
+    g.elementHealth = 4;
+    expect(g.exothermicActive && g.ramDamage === EXOTHERMIC_RAM_DAMAGE, 'at half, rams harden');
+    const cl = mkEnemy(g, 'chlorine', 1, 2);
+    const before = g.elementHealth;
+    g.movePlayer(1, 0);
+    expect(!g.enemies.includes(cl), 'a 3-health chlorine dies to one ram');
+    expect(g.elementHealth === before - 1, 'self damage is still 1, got ' + (before - g.elementHealth));
   }
   // Health is derived from atomic weight and never drops as you evolve.
   {
@@ -573,6 +704,92 @@ function runNobleProbe(element: ElementKey, runs: number, grids: number) {
   console.log(`  ${element.padEnd(7)} cleared ${reach} of ${runs}; destabilised ${destabilised}, other deaths ${otherDeaths}; avg turns used ${perGrid}`);
 }
 
+// =====================================================================
+// Ligand comparison: the same goal-seeking policy, once per configuration
+// =====================================================================
+
+interface ConfigResult {
+  label: string;
+  wins: number;
+  runs: number;
+  avgKills: number;
+  avgDepth: number;
+  killsByElement: Record<string, number>;
+  ramKills: number;
+  totalKills: number;
+  passivationFires: number;
+  supercooledSaves: number;
+}
+
+function runConfig(ligand: LigandId | null, runs: number, maxSteps: number): ConfigResult {
+  let wins = 0, totalKills = 0, totalDepth = 0, passivationFires = 0, supercooledSaves = 0, ramKills = 0;
+  const killsByElement: Record<string, number> = {};
+  for (let run = 0; run < runs; run++) {
+    const start = ELEMENT_ORDER[run % ELEMENT_ORDER.length];
+    const g = new Game(start, ligand);
+    let banked = 0;
+    abilityGivenUpAt = -1;
+    for (let step = 0; step < maxSteps && !g.gameOver; step++) {
+      const el = g.currentElement, killsBefore = g.totalKills;
+      // Passivation's counter is per grid and resets on arrival, so read it before the step and
+      // bank it if this step turned out to be the one that changed grid.
+      const firesBefore = g.passivationFiresThisGrid, depthBefore = g.depth;
+      try {
+        sensibleStep(g);
+        assertInvariants(g);
+      } catch (err) {
+        console.error('FAILED', ligand ?? 'none', 'run', run, 'step', step, (err as Error).message);
+        throw err;
+      }
+      if (g.depth !== depthBefore) banked += firesBefore;
+      const gained = g.totalKills - killsBefore;
+      if (gained > 0) {
+        bump(killsByElement, el, gained);
+        if (lastActionWasRam) ramKills += gained;
+      }
+    }
+    if (g.won) wins++;
+    totalKills += g.totalKills;
+    totalDepth += g.depth;
+    supercooledSaves += g.supercooledFires;
+    passivationFires += banked + g.passivationFiresThisGrid;
+  }
+  return {
+    label: ligand ? LIGANDS[ligand].name : 'no ligand',
+    wins, runs,
+    avgKills: totalKills / runs,
+    avgDepth: totalDepth / runs,
+    killsByElement,
+    ramKills,
+    totalKills,
+    passivationFires,
+    supercooledSaves,
+  };
+}
+
+function reportComparison(results: ConfigResult[]) {
+  console.log('\n=== ligand comparison (goal-seeking policy, ' + results[0].runs + ' games each) ===');
+  console.log('  ' + 'configuration'.padEnd(24) + 'wins'.padStart(6) + 'win%'.padStart(8) + 'avg kills'.padStart(12) + 'deepest'.padStart(10) + 'ram kills'.padStart(12) + 'by ram'.padStart(9));
+  for (const r of results) {
+    console.log(
+      '  ' + r.label.padEnd(24)
+      + String(r.wins).padStart(6)
+      + (100 * r.wins / r.runs).toFixed(1).padStart(7) + '%'
+      + r.avgKills.toFixed(2).padStart(12)
+      + r.avgDepth.toFixed(2).padStart(10)
+      + String(r.ramKills).padStart(12)
+      + (r.totalKills ? (100 * r.ramKills / r.totalKills).toFixed(0) : '0').padStart(8) + '%',
+    );
+  }
+  console.log('\n  kills by element (the element that scored them):');
+  console.log('  ' + 'configuration'.padEnd(24) + ELEMENT_ORDER.map(e => e.slice(0, 4).padStart(7)).join(''));
+  for (const r of results) {
+    console.log('  ' + r.label.padEnd(24) + ELEMENT_ORDER.map(e => String(r.killsByElement[e] ?? 0).padStart(7)).join(''));
+  }
+  const supercooled = results.find(r => r.label === LIGANDS.supercooled.name);
+  if (supercooled) console.log(`\n  Supercooled Core saved ${supercooled.supercooledSaves} runs of ${supercooled.runs}.`);
+}
+
 function report(title: string) {
   console.log(`\n=== ${title} ===`);
   console.log(JSON.stringify(stats));
@@ -603,3 +820,9 @@ report('goal-seeking play (600 games): kill/evolve reach');
 console.log('\n=== noble-gas hatch probe (200 games each, hatch-seeking; Neon wins on its first hatch) ===');
 runNobleProbe('helium', 200, 3);
 runNobleProbe('neon', 200, 1);
+
+resetStats();
+reportComparison([
+  runConfig(null, 600, 600),
+  ...LIGAND_ORDER.map(id => runConfig(id, 600, 600)),
+]);

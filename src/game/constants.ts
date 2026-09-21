@@ -1,4 +1,4 @@
-import type { AimTag, ElementDef, ElementKey, EnemyDef, EnemyType, FxType } from './types';
+import type { AimTag, ElementDef, ElementKey, EnemyDef, EnemyType, FxType, LigandDef, LigandId } from './types';
 
 export const ELEMENT_NAMES: Record<ElementKey, string> = {
   hydrogen: 'Hydrogen', helium: 'Helium', lithium: 'Lithium', beryllium: 'Beryllium', boron: 'Boron',
@@ -144,6 +144,51 @@ export const ENEMIES: Record<EnemyType, EnemyDef> = {
     counter: 'Let it bleed itself out, or hit the tiles beyond the ❓ where it is heading.',
   },
 };
+
+/**
+ * Ligands are bought and equipped in the menu, with quanta, and last the whole run. Exactly one
+ * slot: the single slot is load-bearing for balance, because it stops these from combining.
+ */
+export const LIGANDS: Record<LigandId, LigandDef> = {
+  passivation: {
+    name: 'Passivation Layer',
+    flavour: 'Aluminium and chromium grow a protective oxide skin the moment they are attacked.',
+    description: 'The first time on each grid that damage drops you to 2 health or less, gain 2 shield.',
+    price: 40,
+  },
+  supercooled: {
+    name: 'Supercooled Core',
+    flavour: 'Flash-freezing halts a runaway reaction before it can finish.',
+    description: 'Once per run, a killing blow leaves you at 1 health instead and freezes every neighbour for 2 turns. It cannot save you from destabilising.',
+    price: 60,
+  },
+  fractional: {
+    name: 'Fractional Distillation',
+    flavour: 'Separating a mixture by boiling point is cheaper than separating it by force.',
+    description: 'Everything costs 1 photon less during your first visit to each grid\u2019s hut, evolution included.',
+    price: 50,
+  },
+  exothermic: {
+    name: 'Exothermic Edge',
+    flavour: 'Some reactions release energy as they proceed.',
+    description: 'While at half health or below, your rams deal 3 damage instead of 2. You still take 1.',
+    price: 45,
+  },
+};
+export const LIGAND_ORDER: LigandId[] = ['passivation', 'supercooled', 'fractional', 'exothermic'];
+/** Quanta are the cross-run currency. The glyph never collides with the photon's. */
+export const QUANTA_GLYPH = '⬢';
+export const QUANTA_PER_WIN = 10;
+/** Passivation Layer grants this much shield, once per grid. */
+export const PASSIVATION_SHIELD = 2;
+/** The health at or below which Passivation Layer triggers, on entering that state. */
+export const PASSIVATION_THRESHOLD = 2;
+/** Supercooled Core freezes every neighbour for this many turns as it saves you. */
+export const SUPERCOOLED_FREEZE_TURNS = 2;
+/** Fractional Distillation takes this much off every price during a grid's first hut visit. */
+export const HUT_DISCOUNT = 1;
+/** Exothermic Edge replaces the ram's base damage while you are at half health or below. */
+export const EXOTHERMIC_RAM_DAMAGE = 3;
 
 export const PHOTON_CAP = 5;
 export const START_PHOTONS = 2;

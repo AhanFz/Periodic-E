@@ -84,7 +84,8 @@ export function InspectCard({ game }: { game: Game }) {
         <Para label={`1. ${d.ability1Name} [${d.ability1Cost} 🔆]`}>{d.ability1Desc}</Para>
         <Para label={`2. ${d.ability2Name} [${d.ability2Cost} 🔆]`}>{d.ability2Desc}</Para>
         <Para label="Ram">
-          Walk into a halogen for 2 damage{game.damageBonus > 0 ? ` +${game.damageBonus}` : ''}, taking 1 yourself. Frozen bodies shatter for free.
+          Walk into a halogen for {game.ramDamage + game.damageBonus} damage, taking 1 yourself. Frozen bodies shatter for free.
+          {game.exothermicActive ? ' Exothermic Edge is live while you are this hurt.' : ''}
         </Para>
         {game.batteryTurnsLeft > 0 && (
           <Para label="🔋 Charging">
@@ -122,7 +123,7 @@ export function InspectCard({ game }: { game: Game }) {
           <Reading label="Z" value={`${ENEMY_ATOMIC_NUMBER[enemy.type]}`} />
           <Reading label="Mass" value={`${ENEMY_ATOMIC_MASS[enemy.type]} u`} />
           <Reading label="Health" value={`${enemy.health}/${enemy.maxHealth}`} />
-          <Reading label="Rams to kill" value={`${Math.ceil(enemy.health / (2 + game.damageBonus))}`} />
+          <Reading label="Rams to kill" value={`${Math.ceil(enemy.health / (game.ramDamage + game.damageBonus))}`} />
           <Reading label="Pays" value={`${enemy.bonded ? 2 : 1} 🔆`} />
         </View>
         <Rule style={{ marginVertical: 10 }} />

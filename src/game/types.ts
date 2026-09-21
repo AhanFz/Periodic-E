@@ -19,6 +19,21 @@ export type FxType =
   | 'shield' | 'corrode' | 'encase' | 'collapse' | 'ozone' | 'heal'
   | 'flash' | 'vapor' | 'smoke' | 'spear' | 'bond' | 'crush' | 'photon' | 'tether';
 
+/**
+ * A passive item equipped before a run, from the main menu, bought with quanta. Distinct from
+ * catalysts, which are bought mid-run with photons and apply a flat permanent bonus: a ligand is
+ * conditional, fires on a situation, and is fixed for the whole run.
+ */
+export type LigandId = 'passivation' | 'supercooled' | 'fractional' | 'exothermic';
+
+/**
+ * Where a point of player damage came from. Ligands that intercept damage need to tell these
+ * apart: Supercooled Core deliberately does not save against `destabilise`, or the noble-gas
+ * turn limit would stop being a threat.
+ */
+export type DamageSource =
+  | 'contact' | 'explosion' | 'poison' | 'trail' | 'polarity' | 'collapse' | 'ram' | 'destabilise';
+
 export type MessageType = 'info' | 'success' | 'warning' | 'danger';
 export type HutItem = 'evolve' | 'heal' | 'healthCatalyst' | 'damageCatalyst';
 
@@ -96,6 +111,15 @@ export interface ElementDef {
   ability2Name: string;
   ability2Desc: string;
   ability2Cost: number;
+}
+
+export interface LigandDef {
+  name: string;
+  /** The chemistry the name comes from. */
+  flavour: string;
+  /** What it does, in game terms. */
+  description: string;
+  price: number;
 }
 
 export interface EnemyDef {

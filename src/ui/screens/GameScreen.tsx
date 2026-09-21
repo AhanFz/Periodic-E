@@ -6,6 +6,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { ControlPad } from '../components/ControlPad';
 import { HutModal } from '../components/HutModal';
 import { InspectCard } from '../components/InspectCard';
+import { LigandFlash } from '../components/LigandFlash';
 import { MessageBanner } from '../components/MessageBanner';
 import { PauseModal } from '../components/PauseModal';
 import { Rule, SectionLabel } from '../components/Print';
@@ -61,6 +62,7 @@ export function GameScreen() {
 
       <HutModal game={game} />
       <InspectCard game={game} />
+      <LigandFlash game={game} />
       <PauseModal game={game} />
       <ConfirmModal
         visible={!!pendingMove}

@@ -80,6 +80,30 @@ permanent catalysts (+2 max health, or +1 damage to abilities and rams).
 **Noble gases** (Helium, Neon) are on a timer: reach the hatch within `grid size + 3` turns or start losing
 health each turn.
 
+### Ligands and quanta
+
+A **ligand** binds to your element and changes how it behaves for a whole run. You carry exactly
+one, chosen on the contents page before you begin, and it cannot be swapped mid-run. Keep it clear
+in your head from a catalyst:
+
+| | Catalyst | Ligand |
+|---|---|---|
+| Acquired | Bought in the isotope hut, mid-run | Equipped in the menu, before the run |
+| Cost | Photons, earned and spent inside one run | Quanta, carried across runs |
+| Effect | Flat and permanent: +2 max health, +1 damage | Conditional: it waits for a situation and fires |
+| Scope | The rest of the run | The whole run, from turn one |
+
+| Ligand | Price | What it does |
+|---|---|---|
+| **Passivation Layer** | 40 | The first time on each grid that damage drops you to 2 health or less, gain 2 shield. It reads the moment you *cross* into that state, so sitting at 2 does not keep re-arming it. |
+| **Supercooled Core** | 60 | Once per run, a killing blow leaves you at 1 health instead and freezes every neighbour for 2 turns. It will not save you from destabilising. |
+| **Fractional Distillation** | 50 | Everything is 1 photon cheaper during your first visit to each grid's hut, evolution included. Later visits to the same hut are full price. |
+| **Exothermic Edge** | 45 | While at half max health or below, your rams deal 3 damage instead of 2. You still take 1. |
+
+**Quanta** are the cross-run currency, written with a ⬢ so it never reads as a photon. They are
+earned by finishing a run: 10 for escaping as Neon. Losing pays nothing for now. Photons stay inside
+a run; quanta are the only thing that crosses between them.
+
 ### The elements
 
 Health is `4 + ⌊mass ÷ 3⌋`, so it is the atomic weight that decides how much punishment an element takes.
@@ -210,6 +234,26 @@ Notes:
   with a photon store of 5, and 1 spent to charge, anything above 4 is mostly spilled. Note also that the
   simulator's policy charges and then walks straight back into a fight, so it under-sells the ability by
   design — trust play-testing over the numbers here.
+- **Storage boundary.** `src/persistence/profile.ts` is the only file that touches AsyncStorage, and
+  nothing under `src/game/` imports it. The engine is handed an equipped ligand id in its constructor
+  and knows nothing about where it came from, which is what keeps it loadable by the headless
+  simulator. The quanta award is banked in the zustand store as a run ends, not in the engine.
+- **Profile schema.** One versioned record under a single key, with `schemaVersion` starting at 1.
+  `migrate()` rebuilds it field by field: anything missing, mistyped or unrecognised falls back to its
+  default instead of throwing, and an unknown ligand id is dropped rather than treated as an error, so
+  removing a ligand in a later version cannot brick an existing save. `loadProfile()` never rejects, so
+  corrupt storage yields a fresh profile and the app carries on. Writes are debounced and coalesced.
+- **Ligand triggers** live on the engine as explicit state: `passivationUsedThisGrid` and
+  `hutVisitsThisGrid` reset in `enterGrid`, `supercooledUsedThisRun` only on construction. Every point
+  of player damage goes through `damagePlayer(amount, source)`, one choke point, which is where both
+  intercepting ligands are handled and where the ordering is decided: shields absorb, health falls, a
+  save can intervene, then Passivation reads the transition. Passivation applies after the blow, so it
+  can never prevent the blow that triggered it.
+- **Why Passivation tests an edge and not a threshold.** A plain `health <= 2` test re-arms every time
+  the granted shield absorbs a hit and lets health settle back on the threshold, which is an
+  unkillable loop rather than a ligand. It compares health before and after the damage and fires only
+  on a crossing. A simulator scenario clears the once-per-grid flag and rams six more times to prove
+  the edge test alone holds the line.
 - Physical feedback is a two-layer thing: `src/game/engine.ts` records *what happened* as `hapticCues`,
   and `src/ui/haptics.ts` decides which buzz that is, playing only the most significant cue per action.
   The engine stays free of React and of Expo; the simulator never drains the queue, so it is capped.

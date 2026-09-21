@@ -1,14 +1,15 @@
 import {
   BATTERY_PAYOUT, BATTERY_TURNS, CATALYST_PRICE, DASH_DAMAGE, DOPANT_TRAP_DAMAGE, ELEMENTS, ENCASE_TURNS, ENEMIES,
-  EVOLUTION_CHAIN, EVOLVE_BASE_PRICE, EVOLVE_MIN_PRICE, ION_BEAM_DAMAGE,
+  EVOLUTION_CHAIN, EVOLVE_BASE_PRICE, EVOLVE_MIN_PRICE, EXOTHERMIC_RAM_DAMAGE, HUT_DISCOUNT, ION_BEAM_DAMAGE,
+  LIGANDS, PASSIVATION_SHIELD, PASSIVATION_THRESHOLD, SUPERCOOLED_FREEZE_TURNS,
   FLEE_ROUNDS, HEAL_AMOUNT, HEAL_PRICE, INITIAL_ENEMIES, MAX_DOPANT_TRAPS, MAX_ENCASED, MAX_ENEMIES,
   OZONE_FAR_DAMAGE, OZONE_NEAR_DAMAGE, PHOTON_CAP, POLARITY_CYCLE, RAM_COST, RAM_DAMAGE, SHEET_TURNS,
   SPEAR_DAMAGE, SPEAR_HEALTH, SPEAR_HIT_COST, SPEAR_RANGE, START_PHOTONS, TETHER_TURNS,
 } from './constants';
 import { floodFill, generateGrid } from './grid';
 import type {
-  AimTag, Direction, DopantTrap, ElementKey, Enemy, EnemyType, Fx, FxType, GridLayout, GroundedSpear,
-  HapticCue, HutItem, MessageType, MoveResult, Orientation, PendingWave, PoisonZone, Polarity, Pos, Scorched, Sheet, Trail,
+  AimTag, DamageSource, Direction, DopantTrap, ElementKey, Enemy, EnemyType, Fx, FxType, GridLayout, GroundedSpear,
+  HapticCue, HutItem, LigandId, MessageType, MoveResult, Orientation, PendingWave, PoisonZone, Polarity, Pos, Scorched, Sheet, Trail,
 } from './types';
 
 const CARDINAL: Array<[number, number]> = [[0, -1], [0, 1], [-1, 0], [1, 0]];
@@ -38,6 +39,12 @@ export class Game {
   elementHealth: number;
   gameOver = false;
   won = false;
+  /** Chosen in the menu before the run and fixed for its whole duration. */
+  readonly ligand: LigandId | null;
+  /** Supercooled Core is once per run, so this is never reset by `enterGrid`. */
+  supercooledUsedThisRun = false;
+  /** Counts saves for the simulator's invariant check; it must never exceed 1. */
+  supercooledFires = 0;
 
   // ---- grid-scoped ----
   layout!: GridLayout;
@@ -55,6 +62,12 @@ export class Game {
   playerPoisonTurns = 0;
   /** Lithium's Battery: turns of charge left. It shorts out the moment you lose health. */
   batteryTurnsLeft = 0;
+  /** Passivation Layer is once per grid. */
+  passivationUsedThisGrid = false;
+  /** Counts triggers within the current grid; the simulator fails the run if this exceeds 1. */
+  passivationFiresThisGrid = 0;
+  /** Counted on arrival at the hut tile, not per purchase. Only the first visit is discounted. */
+  hutVisitsThisGrid = 0;
   telegraphTiles: Pos[] = [];
   poisonZones: PoisonZone[] = [];
   scorchedTiles: Scorched[] = [];
@@ -87,17 +100,25 @@ export class Game {
   /** Set when the player lands on the hut; UI shows the shop until cleared. */
   atHut = false;
   /**
+   * A moment too important to lose in the message line. The UI shows it as a card and clears it.
+   * Only Supercooled Core raises one, once per run.
+   */
+  ligandFlash: { title: string; body: string } | null = null;
+  /**
    * True only while the player is on the first turn of a grid, including a grid just entered
    * through the hatch. The board rings the tile they arrived on, then stops.
    */
   showStartMarker = true;
 
-  constructor(element: ElementKey = 'hydrogen') {
+  constructor(element: ElementKey = 'hydrogen', ligand: LigandId | null = null) {
     this.currentElement = element;
+    this.ligand = ligand;
     this.elementsVisited.push(element);
     this.elementHealth = this.maxHealth;
     this.enterGrid();
   }
+
+  private hasLigand(id: LigandId) { return this.ligand === id; }
 
   get elementData() { return ELEMENTS[this.currentElement]; }
   get maxHealth() { return ELEMENTS[this.currentElement].health + this.maxHealthBonus; }
@@ -111,6 +132,19 @@ export class Game {
     return Math.max(EVOLVE_MIN_PRICE, EVOLVE_BASE_PRICE[this.currentElement] - this.stageKills);
   }
   get encasedCount() { return this.enemies.filter(e => e.encasedTurnsLeft > 0).length; }
+
+  /** Exothermic Edge: live while at half max health or below, so catalysts move the threshold. */
+  get exothermicActive() {
+    return this.hasLigand('exothermic') && this.elementHealth <= Math.ceil(this.maxHealth / 2);
+  }
+  /** Base ram damage before the damage catalyst. */
+  get ramDamage() { return this.exothermicActive ? EXOTHERMIC_RAM_DAMAGE : RAM_DAMAGE; }
+  /** Fractional Distillation: 1 off everything, but only across a grid's first hut visit. */
+  get hutDiscount() { return this.hasLigand('fractional') && this.hutVisitsThisGrid <= 1 ? HUT_DISCOUNT : 0; }
+  /** Supercooled Core: still holding its one save. */
+  get supercooledReady() { return this.hasLigand('supercooled') && !this.supercooledUsedThisRun; }
+  /** Passivation Layer: still holding this grid's trigger. */
+  get passivationReady() { return this.hasLigand('passivation') && !this.passivationUsedThisGrid; }
 
   /** Photon price of a tier for the current element. Both tiers are per-element data. */
   abilityCost(tier: 1 | 3) { return tier === 1 ? this.elementData.ability1Cost : this.elementData.ability2Cost; }
@@ -134,6 +168,9 @@ export class Game {
     this.abilityLockedTurns = 0;
     this.playerPoisonTurns = 0;
     this.batteryTurnsLeft = 0;
+    this.passivationUsedThisGrid = false;
+    this.passivationFiresThisGrid = 0;
+    this.hutVisitsThisGrid = 0;
     this.telegraphTiles = [];
     this.poisonZones = [];
     this.scorchedTiles = [];
@@ -221,14 +258,33 @@ export class Game {
   }
 
   addFx(type: FxType, x: number, y: number) { this.pendingEffects.push({ type, x, y }); }
-  private setMessage(text: string, type: MessageType) { this.message = text; this.messageType = type; }
-  private note(text: string) { this.message += ` | ${text}`; }
+  /**
+   * A ligand fires inside `damagePlayer`, which callers follow with their own `setMessage`.
+   * Queueing the line and appending it on the next message write is what stops the caller from
+   * silently overwriting the explanation for something the player just watched happen.
+   */
+  private ligandNotes: string[] = [];
+  private raiseLigandNote(text: string) { this.ligandNotes.push(text); }
+  private flushLigandNotes() {
+    if (!this.ligandNotes.length) return;
+    for (const n of this.ligandNotes) this.message += ` | ${n}`;
+    this.ligandNotes = [];
+  }
+  private setMessage(text: string, type: MessageType) { this.message = text; this.messageType = type; this.flushLigandNotes(); }
+  private note(text: string) { this.message += ` | ${text}`; this.flushLigandNotes(); }
 
   // =====================================================================
   // Damage & death
   // =====================================================================
 
-  private damagePlayer(amount: number) {
+  /**
+   * The single choke point for every point of damage the player takes. Ligands that react to being
+   * hurt are handled here and nowhere else, so there is one place where the ordering is decided:
+   * shields absorb, then health falls, then a save can intervene, then Passivation reads the
+   * transition. Passivation is applied after the blow lands, so it can never stop the blow itself.
+   */
+  private damagePlayer(amount: number, source: DamageSource) {
+    const healthBefore = this.elementHealth;
     let remaining = amount;
     if (this.shieldPoints > 0) {
       const absorbed = Math.min(this.shieldPoints, remaining);
@@ -241,6 +297,55 @@ export class Game {
       this.cue('damage');
       if (this.batteryTurnsLeft > 0) { this.batteryTurnsLeft = 0; this.note('🔋 The charge shorted out'); }
     } else if (amount > 0) this.cue('shielded');
+
+    if (this.elementHealth <= 0) this.trySupercooledSave(source);
+    this.tryPassivation(healthBefore);
+  }
+
+  /**
+   * Supercooled Core. Deliberately blind to `destabilise`: letting it absorb the noble-gas timer
+   * would turn a hard deadline into a speed bump you can simply walk through.
+   */
+  private trySupercooledSave(source: DamageSource) {
+    if (!this.supercooledReady || source === 'destabilise') return;
+    this.supercooledUsedThisRun = true;
+    this.supercooledFires++;
+    this.elementHealth = 1;
+    let frozen = 0;
+    for (const e of this.enemies) {
+      if (e.encasedTurnsLeft > 0) continue;
+      const near = ALL_EIGHT.some(([dx, dy]) => this.enemyTiles(e).some(t => t.x === this.playerPos.x + dx && t.y === this.playerPos.y + dy));
+      if (!near) continue;
+      e.frozenTurnsLeft = Math.max(e.frozenTurnsLeft, SUPERCOOLED_FREEZE_TURNS);
+      for (const t of this.enemyTiles(e)) this.addFx('frost', t.x, t.y);
+      frozen++;
+    }
+    this.addFx('shatter', this.playerPos.x, this.playerPos.y);
+    this.cue('evolve');
+    this.raiseLigandNote(`❄️ ${LIGANDS.supercooled.name} held you at 1 health`);
+    this.ligandFlash = {
+      title: '❄️ Supercooled Core',
+      body: frozen > 0
+        ? `That blow should have finished you. The core flash-froze instead: you hold at 1 health and ${frozen} neighbour${frozen === 1 ? '' : 's'} ${frozen === 1 ? 'is' : 'are'} frozen solid for ${SUPERCOOLED_FREEZE_TURNS} turns. Walk into a frozen body to shatter it for free. This was your one save of the run.`
+        : `That blow should have finished you. The core flash-froze instead and you hold at 1 health. This was your one save of the run.`,
+    };
+  }
+
+  /**
+   * Passivation Layer. It fires on *entering* the low-health state, never while already sitting in
+   * it: a threshold test alone would re-arm every time the shield absorbed a hit and let health
+   * settle back at 2, which is an unkillable loop rather than a ligand.
+   */
+  private tryPassivation(healthBefore: number) {
+    if (!this.passivationReady) return;
+    if (this.elementHealth <= 0) return;
+    if (healthBefore <= PASSIVATION_THRESHOLD || this.elementHealth > PASSIVATION_THRESHOLD) return;
+    this.passivationUsedThisGrid = true;
+    this.passivationFiresThisGrid++;
+    this.shieldPoints += PASSIVATION_SHIELD;
+    this.addFx('shield', this.playerPos.x, this.playerPos.y);
+    this.cue('shielded');
+    this.raiseLigandNote(`🛡️ ${LIGANDS.passivation.name} formed: +${PASSIVATION_SHIELD} shield (${this.shieldPoints})`);
   }
   private die(reason: string) {
     if (this.elementHealth > 0) return;
@@ -294,7 +399,14 @@ export class Game {
   private checkStructures(): boolean {
     if (same(this.playerPos, this.layout.hatch)) { this.takeHatch(); return true; }
     this.atHut = same(this.playerPos, this.layout.hut);
-    if (this.atHut) this.setMessage(`⚗️ Isotope hut. Evolve costs ${this.evolvePrice ?? '—'} photons.`, 'info');
+    if (this.atHut) {
+      this.hutVisitsThisGrid++;
+      const price = this.hutPrice('evolve');
+      this.setMessage(
+        `⚗️ Isotope hut. Evolve costs ${price ?? '—'} photons.${this.hutDiscount > 0 ? ` ${LIGANDS.fractional.name} takes ${this.hutDiscount} off everything this visit.` : ''}`,
+        'info',
+      );
+    }
     return false;
   }
 
@@ -322,7 +434,7 @@ export class Game {
 
   private tickPlayerStatus() {
     if (this.destabilised) {
-      this.damagePlayer(1);
+      this.damagePlayer(1, 'destabilise');
       this.note(`⚠️ Unstable! Turn limit exceeded (-1). Health ${this.elementHealth}`);
       this.die('Destabilised — the noble gas ran out of time.');
     }
@@ -395,12 +507,12 @@ export class Game {
     }
     const free = this.currentElement === 'beryllium' && this.shieldPoints > 0;
     this.cue('ram');
-    if (!free) this.damagePlayer(RAM_COST);
+    if (!free) this.damagePlayer(RAM_COST, 'ram');
     this.addFx('crush', at.x, at.y);
     if (e.type === 'fluorine') { e.armed = false; e.explodeTiles = []; }
     const locks = e.type === 'bromine' && e.suppressedTurns <= 0;
     if (locks) this.lockAbilities();
-    const died = this.damageEnemy(e, this.dmg(RAM_DAMAGE));
+    const died = this.damageEnemy(e, this.dmg(this.ramDamage));
 
     let msg = free ? `🛡️ Rammed ${sym} — the shield took it.` : `💢 Rammed ${sym} (-${RAM_COST}).`;
     if (died) msg += ` ${sym} destroyed!`;
@@ -423,7 +535,7 @@ export class Game {
     }
     const trail = this.trails.find(t => same(t, p));
     if (trail) {
-      this.damagePlayer(1);
+      this.damagePlayer(1, 'trail');
       this.lockAbilities();
       this.setMessage(`🧪 Corrosive trail! -1, abilities locked. Health ${this.elementHealth}`, 'danger');
       this.die('Dissolved by bromine residue.');
@@ -870,7 +982,14 @@ export class Game {
   // Hut
   // =====================================================================
 
+  /** The price the player actually pays, discount included. Never negative. */
   hutPrice(item: HutItem): number | null {
+    const base = this.basePrice(item);
+    if (base === null) return null;
+    return Math.max(0, base - this.hutDiscount);
+  }
+  /** The list price, before any ligand. The UI strikes this through when it differs. */
+  basePrice(item: HutItem): number | null {
     if (item === 'evolve') return this.evolvePrice;
     if (item === 'heal') return HEAL_PRICE;
     return CATALYST_PRICE;
@@ -956,7 +1075,7 @@ export class Game {
         this.addFx('gust', nx, ny);
         this.onPlayerArrive();
       } else {
-        this.damagePlayer(1);
+        this.damagePlayer(1, 'polarity');
         this.addFx('crush', this.playerPos.x, this.playerPos.y);
         this.note(`💢 Crushed against the edge (-1). Health ${this.elementHealth}`);
         this.die('Crushed by the polarity shift.');
@@ -1060,7 +1179,7 @@ export class Game {
     const p = this.playerPos;
     if (e.type === 'bromine') {
       this.addFx('corrode', p.x, p.y);
-      this.damagePlayer(1);
+      this.damagePlayer(1, 'contact');
       const locks = e.suppressedTurns <= 0;
       if (locks) this.lockAbilities();
       this.setMessage(`🧪 ${sym} corroded you (-1).${locks ? ' Abilities locked next turn.' : ' Its corrosion is dulled.'} Health ${this.elementHealth}${this.shieldSuffix()}`, 'danger');
@@ -1069,14 +1188,14 @@ export class Game {
     }
     if (e.type === 'iodine') {
       this.addFx('vapor', p.x, p.y);
-      this.damagePlayer(1);
+      this.damagePlayer(1, 'contact');
       const died = this.damageEnemy(e, 1);
       this.setMessage(`💜 ${sym} contact: -1 each.${died ? ' It dissipated.' : ''} Health ${this.elementHealth}${this.shieldSuffix()}`, 'danger');
       this.die('Iodine got you.');
       return;
     }
     this.addFx('crush', p.x, p.y);
-    this.damagePlayer(1);
+    this.damagePlayer(1, 'contact');
     this.setMessage(`💥 Hit by ${sym} (-1). Health ${this.elementHealth}${this.shieldSuffix()}`, 'danger');
     this.die('You were defeated.');
   }
@@ -1103,7 +1222,7 @@ export class Game {
     for (const e of this.enemies.filter(x => x.type === 'fluorine' && x.armed)) {
       for (const t of e.explodeTiles) this.addFx('explosion', t.x, t.y);
       if (e.explodeTiles.some(t => same(t, this.playerPos))) {
-        this.damagePlayer(2);
+        this.damagePlayer(2, 'explosion');
         this.setMessage(`💥 Fluorine detonated (-2). Health ${this.elementHealth}${this.shieldSuffix()}`, 'danger');
         this.die('Caught in the blast.');
       }
@@ -1264,7 +1383,7 @@ export class Game {
       }
       if (s.tiles.some(t => same(t, this.playerPos))) {
         const carbon = this.currentElement === 'carbon';
-        if (!carbon) this.damagePlayer(1);
+        if (!carbon) this.damagePlayer(1, 'collapse');
         let back: Pos | null = null;
         for (const [dx, dy] of CARDINAL) { const p = { x: this.playerPos.x + dx, y: this.playerPos.y + dy }; if (this.playerCanEnter(p.x, p.y) && !this.enemyAt(p.x, p.y)) { back = p; break; } }
         if (!back) {
@@ -1290,7 +1409,7 @@ export class Game {
     if (inCloud && !this.poisonImmune && this.playerPoisonTurns <= 0) this.playerPoisonTurns = 2;
     if (inCloud && this.poisonImmune) this.note('🛡️ Inert shield shrugged off the poison');
     if (this.playerPoisonTurns > 0) {
-      this.damagePlayer(1);
+      this.damagePlayer(1, 'poison');
       this.playerPoisonTurns--;
       this.note(`☠️ Poison (-1)${this.playerPoisonTurns > 0 ? ', lingering' : ''}. Health ${this.elementHealth}`);
       this.die('Poisoned to death.');

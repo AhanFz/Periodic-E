@@ -12,6 +12,7 @@
     "sim": "tsc --ignoreConfig sim/sim.ts src/game/*.ts --outDir .sim-out --module commonjs --target es2022 --esModuleInterop --skipLibCheck --moduleResolution bundler --strict && node .sim-out/sim/sim.js"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.7",
     "expo-haptics": "~57.0.3",
     "expo-status-bar": "~57.0.1",
