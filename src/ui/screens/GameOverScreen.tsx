@@ -1,5 +1,6 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { RunRecap } from '../components/RunRecap';
 import { PaperButton, Rule, SectionLabel } from '../components/Print';
 import { fonts, theme } from '../theme';
 import { ELEMENTS, LIGANDS, QUANTA_GLYPH } from '@/game/constants';
@@ -49,6 +50,7 @@ export function GameOverScreen() {
         <Row label="Path" value={game.elementsVisited.map(e => ELEMENTS[e].symbol).join(' → ')} last />
       </View>
 
+      <RunRecap game={game} />
       <View style={styles.buttons}>
         <PaperButton label="Contents" variant="outline" style={{ flex: 1 }} onPress={toMenu} />
         <PaperButton label="Repeat experiment" variant="primary" style={{ flex: 1 }} onPress={retry} />

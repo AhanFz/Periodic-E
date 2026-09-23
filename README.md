@@ -98,7 +98,7 @@ in your head from a catalyst:
 | **Passivation Layer** | 40 | The first time on each grid that damage drops you to 2 health or less, gain 2 shield. It reads the moment you *cross* into that state, so sitting at 2 does not keep re-arming it. |
 | **Supercooled Core** | 60 | Once per run, a killing blow leaves you at 1 health instead and freezes every neighbour for 2 turns. It will not save you from destabilising. |
 | **Fractional Distillation** | 50 | Everything is 1 photon cheaper during your first visit to each grid's hut, evolution included. Later visits to the same hut are full price. |
-| **Exothermic Edge** | 45 | While at half max health or below, your rams deal 3 damage instead of 2. You still take 1. |
+| **Exothermic Edge** | 45 | While your health is down to a third of its maximum or less, your rams deal 3 damage instead of 2. You still take 1. |
 
 **Quanta** are the cross-run currency, written with a ⬢ so it never reads as a photon. They are
 earned by finishing a run: 10 for escaping as Neon. Losing pays nothing for now. Photons stay inside
@@ -125,7 +125,7 @@ Health is `4 + ⌊mass ÷ 3⌋`, so it is the atomic weight that decides how muc
 | | HP | Behaviour |
 |---|---|---|
 | **F** Fluorine | 2 | Arms when next to you (💣), explodes the following turn for 2. Ram it before it goes off. |
-| **Cl** Chlorine | 3 | Channels (⚠️ tiles), then releases poison (☠️). Standing in poison costs 1 a turn for 2 turns. |
+| **Cl** Chlorine | 3 | Channels (⚠️ tiles, thin haze), then releases poison (churning purple gas). Standing in poison costs 1 a turn for 2 turns. |
 | **Br** Bromine | 3 | Liquid. Any contact locks your abilities for a turn. Resists Lithium's ray. |
 | **I** Iodine | 4 | Vanishes for a turn (❓ marks where it was), paying 1 health each time. |
 
@@ -137,7 +137,7 @@ everything slides — you one way, halogens the other.
 
 ## What to test
 
-Play at least three runs starting as Hydrogen, then try a few elements from the *Table of contents*.
+Play at least three runs starting as Hydrogen, then try a few elements in the *Playable tutorial*.
 We would especially like to hear about:
 
 - **Clarity.** Was it obvious what a button would do? Did any message leave you unsure what just happened?
@@ -194,6 +194,7 @@ sim/           headless simulator: worked-example scenarios, random and goal-see
 ```bash
 npm run typecheck          # tsc --noEmit
 npm run sim                # scenarios + 1200 simulated games with invariant checks + noble-gas probe
+npm run preview            # renders the drawn tile effects to .preview/ so they can be looked at
 npx expo export --platform android --output-dir /tmp/check --clear   # confirm it bundles
 ```
 
@@ -205,6 +206,22 @@ Notes:
   versions by hand.
 - Core `Animated` is used for all motion so the game runs in Expo Go with no native config. Emoji stand in
   for icons and FX.
+- **Hazards are drawn, not lettered.** Scorched ground, poison, ice and electrical discharges used to
+  be a tint plus an emoji in the tile corner, which read as a label rather than as terrain. They are
+  now `ScorchedGround`, `PoisonCloud`, `FrostCrystals` and `BoltStreak`, drawn with `react-native-svg`
+  (bundled in Expo Go, so no development build is needed) as real polygons, paths and gradients.
+  Shapes are seeded from the tile's coordinates through `src/ui/seed.ts`, so a given tile keeps its
+  own cracks and its own cloud instead of reshuffling on every render. Where a drawn effect replaces
+  an icon, `Tile` drops the icon, so a tile never says the same thing twice in two visual languages.
+- **Geometry lives apart from the components.** `src/ui/shapes.ts` holds the maths with no React and
+  no react-native imports, which is what makes `npm run preview` possible: it renders the same
+  functions the game uses into `.preview/effects.svg`, rasterises it with `qlmanage`, and shows every
+  effect at both phone size and 3x. Tuning these by guessing at component code and reloading a phone
+  is how the first attempt ended up with lava that looked like orange lightning. Look at the sheet.
+- **Two ordering rules learned the hard way.** The scorched tile draws rock *over* a lava bed, so the
+  glow is the seam between slabs; bright strokes on a dark tile read as lightning, not as ground. Its
+  pulse is a third layer *between* bed and slabs, so the slabs mask it everywhere except the gaps and
+  it can still animate on the native driver.
 - Voids are drawn as holes in the page rather than shaded paper: near-black, with a few slow-twinkling
   points of light whose positions are hashed from the tile's own coordinates, so a given hole keeps its
   constellation instead of reshuffling on each render.
@@ -257,3 +274,58 @@ Notes:
 - Physical feedback is a two-layer thing: `src/game/engine.ts` records *what happened* as `hapticCues`,
   and `src/ui/haptics.ts` decides which buzz that is, playing only the most significant cue per action.
   The engine stays free of React and of Expo; the simulator never drains the queue, so it is capped.
+
+
+### Playable tutorial
+
+Normal runs always start as Hydrogen. Choose **Playable tutorial** on the main menu to borrow any
+of the nine elements and any one ligand (or none), including ones you have not bought. Practice
+never grants quanta, changes ownership/equipment or records a win/loss.
+
+Guided rooms teach moving and collecting photons, skipping a full turn, ramming, both abilities,
+your chosen ligand, and using the hatch. Targets and resources are prepared for your chosen kit.
+Battery demonstrates its full countdown; Boron demonstrates trap damage and shattering; Carbon
+practises bridging and throwing a forged spear. No reinforcements or noble-gas deadlines apply in
+practice, but damage still does. Reset any lesson or choose different equipment without penalty.
+
+Tutorial checks are included in `npm run sim` (306 lesson/equipment scenarios). Run
+`node tools/test-tutorial-store.cjs` to check practice/profile isolation and normal Hydrogen starts.
+This working copy is independent: edit only `element evolution v2 - chatgpt`, not either original.
+
+
+## Phone playability and combat presentation
+
+The game screen has a compact safe-area header, a board sized to the remaining space, and a fixed control area. In landscape the controls sit beside the board. Long instructions and full stats are under **Details**; the current tutorial instruction remains beside the controls. At unusually large text sizes the control area can scroll without moving the board off-screen.
+
+Tap a direction or ability to act immediately. There is no extra confirmation for ordinary actions. Hold a direction, immediate ability, or aimed Fire/Curve button for an optional preview; **Back to controls** dismisses it without spending anything. Aimed abilities still require a direction and Fire. The existing hidden-Iodine warning remains. One End/Skip turn button passes unused actions; using both slots still ends the turn automatically.
+
+Previews fork the engine, resolve only immediate player effects, and stop before enemy responses or a new grid is generated. They never consume random state or change the live game. They report outgoing damage/statuses, health/shield changes, photons and turn completion. Exothermic is evaluated after ram self-damage, exactly as in combat. Hidden enemies are not identified by previews, and their presence makes the displayed outcome incomplete.
+
+Combat resolves once in the pure engine. An optional observer records copies for attack, damage, enemy response and status beats; the store plays those copies in order, then publishes the result and any rewards. Inputs are blocked during playback. Finish animation, pausing or backgrounding the app safely settles it. Resetting/returning to the menu cancels obsolete timers. System Reduce Motion bypasses playback and stops ambient animations.
+
+Lava uses seeded irregular basalt fractures, ice uses quieter edge crystals, poison uses drifting translucent clouds with dashed warning borders, and lightning has an amber core with contrasting outlines. Atom backplates and topmost gold targeting borders keep symbols readable. For composed animation review, run the web preview and open `/?effects` in a development build: it uses the actual Board/Tile/Atom components, includes a void-crossing beam, and has targeting and reduced-motion controls. The old static SVG sheet is only a geometry diagnostic, not animation acceptance testing.
+
+### Freeze and early progression
+
+Freeze cancels armed Fluorine explosions and Chlorine poison telegraphs. A thawed enemy must prepare again. This rule is shared by Helium, Neon and Supercooled Core. Already-existing damage is not reversed.
+
+| Element | Starting enemies | Refill floor | Spawn cap | Additional spawn interval |
+| --- | ---: | ---: | ---: | ---: |
+| Hydrogen | 1 | 1 | 2 | 6 turns |
+| Helium | 2 | 2 | 3 | 5 turns |
+| Lithium | 2 | 2 | 4 | 4 turns |
+| Beryllium | 2 | 3 | 4 | 4 turns |
+| Boron / Carbon | 2 | 3 | 5 | 4 turns |
+| Nitrogen / Oxygen / Neon | 2 | 4 | 6 | 4 turns |
+
+The refill floor can cause one arrival each turn until restored; the cap always applies. Spawn checks count bonded enemies as two atoms, so splitting a bond cannot bypass the cap. Evolving changes the pressure settings immediately. Photon generation, the photon cap, evolution prices, bonding rules and grid generation are unchanged.
+
+Additional checks: `node tools/test-tutorial-store.cjs` and `node tools/test-playback-store.cjs`. `npm run sim` now includes 1,836 preview-purity cases, loaded-attack Freeze cases, Exothermic ordering and population caps, in addition to the existing tutorial and combat scenarios.
+
+## Chemistry Catalogue
+
+The main menu's **Chemistry Catalogue** contains all nine playable elements and four halogens. Each selectable entry separates real chemistry, the ability connection, current game mechanics and creative liberties. Mechanics are read from the game constants so costs and descriptions stay aligned with balance updates. Catalogue selection never starts a run or equips anything.
+
+Halogen entries include a shared-electron-pair illustration for F₂, Cl₂, Br₂ and I₂, distinguishing covalent bonding from nuclear fusion. Other clarifications include hydrogen bonding versus H₂, cryogenic helium versus room-temperature gas, nitrogen compounds versus N₂, game poison colours versus real colours, and fictional health/evolution/noble-gas timers.
+
+Educational copy lives in `src/content/chemistry.ts`, with per-element Royal Society of Chemistry references, an OpenStax bonding reference, and a Toshiba semiconductor reference for boron doping. Text is bundled for offline reading; optional source links open the browser. `CatalogueScreen` owns selection locally and supports Android back navigation. No persistence or engine rules are changed by browsing.

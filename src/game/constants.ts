@@ -38,13 +38,13 @@ export const ELEMENT_HEALTH = Object.fromEntries(
 export const ELEMENTS: Record<ElementKey, ElementDef> = {
   hydrogen: {
     symbol: 'H', health: ELEMENT_HEALTH.hydrogen, noble: false,
-    ability1Short: 'Bond', ability1Name: 'Hydrogen Bond', ability1Desc: 'Tether an adjacent enemy for 2 turns. It trails into each tile you leave and cannot act.', ability1Cost: 1,
+    ability1Short: 'Bond', ability1Name: 'Hydrogen Bond', ability1Desc: 'Tether an adjacent enemy for 3 turns. It trails into each tile you leave and cannot act.', ability1Cost: 1,
     ability2Short: 'Dash', ability2Name: 'Double Dash', ability2Desc: 'Dash 2 tiles in a line: 3 damage to every enemy you pass through, none to you. Uses your move too.', ability2Cost: 3,
   },
   helium: {
     symbol: 'He', health: ELEMENT_HEALTH.helium, noble: true,
-    ability1Short: 'Freeze', ability1Name: 'Freeze', ability1Desc: 'Freeze enemies in the 4 cardinal tiles for 2 turns.', ability1Cost: 1,
-    ability2Short: 'Freeze+', ability2Name: 'Deep Freeze', ability2Desc: 'Freeze all 8 surrounding tiles for 3 rounds. Enemies avoid frozen bodies.', ability2Cost: 3,
+    ability1Short: 'Freeze', ability1Name: 'Freeze', ability1Desc: 'Freeze enemies in the 4 cardinal tiles for 2 turns, cancelling prepared attacks.', ability1Cost: 1,
+    ability2Short: 'Freeze+', ability2Name: 'Deep Freeze', ability2Desc: 'Freeze all 8 surrounding tiles for 3 rounds, cancelling prepared attacks. Enemies avoid frozen bodies.', ability2Cost: 3,
   },
   lithium: {
     symbol: 'Li', health: ELEMENT_HEALTH.lithium, noble: false,
@@ -128,13 +128,13 @@ export const ENEMIES: Record<EnemyType, EnemyDef> = {
   chlorine: {
     symbol: 'Cl', health: 3,
     desc: 'Channels, then poisons. Shape rotates: diagonals, cardinals, then a line at you.',
-    tell: '⚠️ tiles mark next turn\'s cloud; ☠️ tiles are already poison.',
+    tell: '⚠️ and a thin haze mark next turn\'s cloud. A tile churning with purple gas is poison now.',
     counter: 'Step off the marked tiles, or kill it while it channels — it cannot move that turn.',
   },
   bromine: {
     symbol: 'Br', health: 3,
     desc: 'Liquid. Resists electricity. Any contact, including your rams, locks your abilities for a round.',
-    tell: 'Molecules leave a 🧪 trail that burns and locks on contact.',
+    tell: 'Molecules leave a 🧪 trail lasting 2 turns that burns and locks on contact.',
     counter: 'Kill it at range. If you must ram, do it on a turn you did not want an ability.',
   },
   iodine: {
@@ -171,14 +171,14 @@ export const LIGANDS: Record<LigandId, LigandDef> = {
   exothermic: {
     name: 'Exothermic Edge',
     flavour: 'Some reactions release energy as they proceed.',
-    description: 'While at half health or below, your rams deal 3 damage instead of 2. You still take 1.',
+    description: 'While your health is down to a third of its maximum or less, your rams deal 3 damage instead of 2. You still take 1.',
     price: 45,
   },
 };
 export const LIGAND_ORDER: LigandId[] = ['passivation', 'supercooled', 'fractional', 'exothermic'];
 /** Quanta are the cross-run currency. The glyph never collides with the photon's. */
 export const QUANTA_GLYPH = '⬢';
-export const QUANTA_PER_WIN = 10;
+export const QUANTA_PER_WIN = 50;
 /** Passivation Layer grants this much shield, once per grid. */
 export const PASSIVATION_SHIELD = 2;
 /** The health at or below which Passivation Layer triggers, on entering that state. */
@@ -187,8 +187,14 @@ export const PASSIVATION_THRESHOLD = 2;
 export const SUPERCOOLED_FREEZE_TURNS = 2;
 /** Fractional Distillation takes this much off every price during a grid's first hut visit. */
 export const HUT_DISCOUNT = 1;
-/** Exothermic Edge replaces the ram's base damage while you are at half health or below. */
+/** Exothermic Edge replaces the ram's base damage while you are hurt badly enough. */
 export const EXOTHERMIC_RAM_DAMAGE = 3;
+/**
+ * How deep the wound has to be. Max health over 3, rounded up: for an 8-health Carbon that is 3
+ * rather than the 4 a halving would give, so the window costs you one more ram to reach and sits
+ * genuinely close to death. At a half it was the strongest ligand by a wide margin.
+ */
+export const EXOTHERMIC_HEALTH_DIVISOR = 3;
 
 export const PHOTON_CAP = 5;
 export const START_PHOTONS = 2;
@@ -200,7 +206,7 @@ export const SHEET_TURNS = 3;
 /** Ramming: walking into an enemy. Fixed numbers so every element can afford it. */
 export const RAM_DAMAGE = 2;
 export const RAM_COST = 1;
-export const TETHER_TURNS = 2;
+export const TETHER_TURNS = 3;
 export const DASH_DAMAGE = 3;
 export const SPEAR_HEALTH = 4;
 export const SPEAR_DAMAGE = 3;
@@ -249,4 +255,17 @@ export const AIM_ACTION_WORDS: Record<AimTag, string> = {
 export const AIM_TITLES: Record<AimTag, string> = {
   h_bond: '🪢 Hydrogen Bond', h_dash: '💨 Double Dash', li_beam: '⚡ Ion Beam',
   b_encase: '🪟 Encase', c_sheet: '🕸️ Graphene Sheet', c_throw: '💠 Throw Spear', n_blast2: '💥 Blast',
+};
+
+/** Spawn pressure follows the element, so lingering as Hydrogen stays manageable. */
+export const ENEMY_PRESSURE: Record<ElementKey, { initial: number; floor: number; cap: number; interval: number }> = {
+  hydrogen: { initial: 1, floor: 1, cap: 2, interval: 6 },
+  helium: { initial: 2, floor: 2, cap: 3, interval: 5 },
+  lithium: { initial: 2, floor: 2, cap: 4, interval: 4 },
+  beryllium: { initial: 2, floor: 3, cap: 4, interval: 4 },
+  boron: { initial: 2, floor: 3, cap: 5, interval: 4 },
+  carbon: { initial: 2, floor: 3, cap: 5, interval: 4 },
+  nitrogen: { initial: 2, floor: 4, cap: 6, interval: 4 },
+  oxygen: { initial: 2, floor: 4, cap: 6, interval: 4 },
+  neon: { initial: 2, floor: 4, cap: 6, interval: 4 },
 };

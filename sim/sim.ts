@@ -1,3 +1,5 @@
+import { runPresentationScenarios } from './presentation';
+import { runTutorialScenarios } from './tutorial';
 import { Game } from '../src/game/engine';
 import {
   ATOMIC_MASS, BATTERY_PAYOUT, BATTERY_TURNS, ELEMENTS, ELEMENT_ORDER, ENEMIES, EXOTHERMIC_RAM_DAMAGE,
@@ -164,13 +166,13 @@ function runScenarios() {
     const g = blank('hydrogen');
     const c = mkEnemy(g, 'chlorine', 1, 2);
     g.activateAbility(1); g.previewAim('right'); g.confirmAim();
-    expect(c.tetherTurnsLeft === 2, 'tethered for 2');
+    expect(c.tetherTurnsLeft === 3, 'tethered for 3');
     expect(g.photons === 1, 'tether cost 1');
     g.movePlayer(0, -1);
     expect(c.x === 0 && c.y === 2, 'dragged into the vacated tile, at ' + JSON.stringify({ x: c.x, y: c.y }));
     expect(g.playerPos.x === 0 && g.playerPos.y === 1, 'player moved');
     expect(g.turn === 1 && g.elementHealth === g.maxHealth, 'turn ended and the tethered enemy did not attack');
-    expect(c.tetherTurnsLeft === 1, 'tether ticked');
+    expect(c.tetherTurnsLeft === 2, 'tether ticked');
   }
   // Tethering a molecule with no room fails and costs nothing.
   {
@@ -412,8 +414,11 @@ function runScenarios() {
     g.enemies = [];
     expect(g.maxHealth === 8 && !g.exothermicActive, 'healthy carbon rams for 2');
     expect(g.ramDamage === RAM_DAMAGE, 'base ram damage');
+    expect(g.exothermicThreshold === 3, 'an 8-health carbon hardens at 3, got ' + g.exothermicThreshold);
     g.elementHealth = 4;
-    expect(g.exothermicActive && g.ramDamage === EXOTHERMIC_RAM_DAMAGE, 'at half, rams harden');
+    expect(!g.exothermicActive, 'one above the threshold is still a soft ram');
+    g.elementHealth = 3;
+    expect(g.exothermicActive && g.ramDamage === EXOTHERMIC_RAM_DAMAGE, 'at the threshold, rams harden');
     const cl = mkEnemy(g, 'chlorine', 1, 2);
     const before = g.elementHealth;
     g.movePlayer(1, 0);
@@ -809,6 +814,8 @@ function resetStats() {
 // =====================================================================
 
 runScenarios();
+runTutorialScenarios();
+runPresentationScenarios();
 
 runGames(randomStep, 600, 400);
 report('random play (600 games): invariants hold');

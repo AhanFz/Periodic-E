@@ -35,7 +35,7 @@ function enemyStatus(e: Enemy): string[] {
   if (e.encasedTurnsLeft > 0) out.push(`🪟 Encased — bursts in ${e.encasedTurnsLeft}`);
   if (e.frozenTurnsLeft > 0) out.push(`❄️ Frozen for ${e.frozenTurnsLeft} — ram it to shatter it for free`);
   if (e.tetherTurnsLeft > 0) out.push(`🪢 Tethered for ${e.tetherTurnsLeft} — it cannot act`);
-  if (e.paralyzed) out.push('⚡ Paralyzed for this round');
+  if (e.paralyzed) out.push('⚡ Paralyzed for this round — ramming costs you no health; normal damage applies');
   if (e.armed) out.push('💣 Armed — it detonates at the end of your turn');
   if (e.telegraph) out.push('⚠️ Channelling — the marked tiles bloom next turn');
   if (e.bondingWith !== null) out.push('🔗 Bonding — separate them or it doubles');
@@ -84,7 +84,7 @@ export function InspectCard({ game }: { game: Game }) {
         <Para label={`1. ${d.ability1Name} [${d.ability1Cost} 🔆]`}>{d.ability1Desc}</Para>
         <Para label={`2. ${d.ability2Name} [${d.ability2Cost} 🔆]`}>{d.ability2Desc}</Para>
         <Para label="Ram">
-          Walk into a halogen for {game.ramDamage + game.damageBonus} damage, taking 1 yourself. Frozen bodies shatter for free.
+          Walk into a halogen for {game.ramDamage + game.damageBonus} damage, normally taking 1 yourself. Paralyzed targets cost no self-damage but take normal ram damage. Frozen bodies shatter for free.
           {game.exothermicActive ? ' Exothermic Edge is live while you are this hurt.' : ''}
         </Para>
         {game.batteryTurnsLeft > 0 && (

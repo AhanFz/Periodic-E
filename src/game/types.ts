@@ -91,7 +91,13 @@ export interface DopantTrap { x: number; y: number; turnsLeft: number; }
 export interface Trail { x: number; y: number; turnsLeft: number; }
 export interface GroundedSpear { x: number; y: number; health: number; }
 export interface PendingWave { x: number; y: number; roundsLeft: number; }
-export interface Fx { type: FxType; x: number; y: number; }
+export interface Fx {
+  type: FxType;
+  x: number;
+  y: number;
+  /** Degrees to turn the effect, so a discharge runs along the beam that made it. */
+  angle?: number;
+}
 
 export interface Polarity {
   active: boolean;

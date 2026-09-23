@@ -9,7 +9,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "sim": "tsc --ignoreConfig sim/sim.ts src/game/*.ts --outDir .sim-out --module commonjs --target es2022 --esModuleInterop --skipLibCheck --moduleResolution bundler --strict && node .sim-out/sim/sim.js"
+    "sim": "tsc --ignoreConfig sim/sim.ts src/game/*.ts --outDir .sim-out --module commonjs --target es2022 --esModuleInterop --skipLibCheck --moduleResolution bundler --strict && node .sim-out/sim/sim.js",
+    "preview": "tsc --ignoreConfig tools/preview.ts src/ui/shapes.ts src/ui/seed.ts --outDir .preview/out --module commonjs --target es2022 --esModuleInterop --skipLibCheck --moduleResolution bundler --strict && node .preview/out/tools/preview.js > .preview/effects.svg && qlmanage -t -s 1400 -o .preview/png .preview/effects.svg >/dev/null 2>&1 && echo 'wrote .preview/effects.svg and .preview/png/effects.svg.png'"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -17,7 +18,11 @@
     "expo-haptics": "~57.0.3",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
+    "react-dom": "19.2.3",
     "react-native": "0.86.0",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-svg": "15.15.4",
+    "react-native-web": "^0.21.2",
     "zustand": "^5.0.2"
   },
   "devDependencies": {

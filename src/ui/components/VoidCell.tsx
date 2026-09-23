@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
+import { useAmbientMotion } from '../motion';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { theme } from '../theme';
 
@@ -16,23 +17,13 @@ function hash(x: number, y: number, i: number) {
 }
 
 function Star({ size, x, y, index }: { size: number; x: number; y: number; index: number }) {
-  const twinkle = useRef(new Animated.Value(hash(x, y, index + 40))).current;
   const left = hash(x, y, index) * 0.82 + 0.09;
   const top = hash(x, y, index + 10) * 0.82 + 0.09;
   const dot = hash(x, y, index + 20) < 0.25 ? 2.2 : 1.4;
   const warm = hash(x, y, index + 30) < 0.18;
   const period = 900 + Math.floor(hash(x, y, index + 50) * 1400);
 
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(twinkle, { toValue: 1, duration: period, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.timing(twinkle, { toValue: 0, duration: period, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [twinkle, period]);
+  const twinkle = useAmbientMotion(period);
 
   return (
     <Animated.View

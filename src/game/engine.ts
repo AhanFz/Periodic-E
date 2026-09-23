@@ -1,6 +1,8 @@
+import { freshHistory, type Milestone } from './history';
 import {
-  BATTERY_PAYOUT, BATTERY_TURNS, CATALYST_PRICE, DASH_DAMAGE, DOPANT_TRAP_DAMAGE, ELEMENTS, ENCASE_TURNS, ENEMIES,
-  EVOLUTION_CHAIN, EVOLVE_BASE_PRICE, EVOLVE_MIN_PRICE, EXOTHERMIC_RAM_DAMAGE, HUT_DISCOUNT, ION_BEAM_DAMAGE,
+  ENEMY_PRESSURE, BATTERY_PAYOUT, BATTERY_TURNS, CATALYST_PRICE, DASH_DAMAGE, DOPANT_TRAP_DAMAGE, ELEMENTS, ENCASE_TURNS, ENEMIES,
+  EVOLUTION_CHAIN, EVOLVE_BASE_PRICE, EVOLVE_MIN_PRICE, EXOTHERMIC_HEALTH_DIVISOR, EXOTHERMIC_RAM_DAMAGE,
+  HUT_DISCOUNT, ION_BEAM_DAMAGE,
   LIGANDS, PASSIVATION_SHIELD, PASSIVATION_THRESHOLD, SUPERCOOLED_FREEZE_TURNS,
   FLEE_ROUNDS, HEAL_AMOUNT, HEAL_PRICE, INITIAL_ENEMIES, MAX_DOPANT_TRAPS, MAX_ENCASED, MAX_ENEMIES,
   OZONE_FAR_DAMAGE, OZONE_NEAR_DAMAGE, PHOTON_CAP, POLARITY_CYCLE, RAM_COST, RAM_DAMAGE, SHEET_TURNS,
@@ -26,6 +28,32 @@ const adjacent = (a: Pos, b: Pos) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y) =
 const randomDirection = (): Direction => (['up', 'down', 'left', 'right'] as Direction[])[Math.floor(Math.random() * 4)];
 
 export class Game {
+  history = freshHistory();
+  private remember(kind: Milestone['kind'], text: string) {
+    if (this.projecting) return;
+    this.history.milestones.push({ turn: this.turn, grid: this.depth, kind, text });
+    if (this.history.milestones.length > 200) { this.history.milestones.shift(); this.history.omittedMilestones++; }
+  }
+  private recordLigand(id: LigandId, text: string) {
+    if (this.projecting) return;
+    this.history.ligandCounts[id]++;
+    this.remember('ligand', text);
+  }
+
+  /** Optional presentation observer. Never participates in rules or persistence. */
+  onFrame?: (label: string) => void;
+  projecting = false;
+  projectedDamage: Array<{ id: number; amount: number }> = [];
+  projectedTurnEnd = false;
+  projectedExit = false;
+  fork(): Game {
+    const copy = Object.assign(Object.create(Game.prototype), JSON.parse(JSON.stringify(this, (key, value) =>
+      key === 'onFrame' ? undefined : value instanceof Set ? [...value] : value)));
+    copy.region = new Set(this.region);
+    copy.onFrame = undefined;
+    return copy;
+  }
+
   // ---- run-scoped ----
   currentElement: ElementKey;
   depth = 1;
@@ -110,7 +138,7 @@ export class Game {
    */
   showStartMarker = true;
 
-  constructor(element: ElementKey = 'hydrogen', ligand: LigandId | null = null) {
+  constructor(element: ElementKey = 'hydrogen', ligand: LigandId | null = null, readonly mode: 'run' | 'tutorial' = 'run') {
     this.currentElement = element;
     this.ligand = ligand;
     this.elementsVisited.push(element);
@@ -123,7 +151,7 @@ export class Game {
   get elementData() { return ELEMENTS[this.currentElement]; }
   get maxHealth() { return ELEMENTS[this.currentElement].health + this.maxHealthBonus; }
   get isNoble() { return ELEMENTS[this.currentElement].noble; }
-  get turnLimit() { return this.isNoble ? this.gridSize + 3 : null; }
+  get turnLimit() { return this.mode === 'run' && this.isNoble ? this.gridSize + 3 : null; }
   get turnsLeft() { return this.turnLimit === null ? null : this.turnLimit - this.turnsOnGrid; }
   get destabilised() { return this.turnLimit !== null && this.turnsOnGrid > this.turnLimit; }
   get evolvePrice() {
@@ -133,9 +161,11 @@ export class Game {
   }
   get encasedCount() { return this.enemies.filter(e => e.encasedTurnsLeft > 0).length; }
 
-  /** Exothermic Edge: live while at half max health or below, so catalysts move the threshold. */
+  /** The health at or below which Exothermic Edge hardens your rams. Moves with max health. */
+  get exothermicThreshold() { return Math.ceil(this.maxHealth / EXOTHERMIC_HEALTH_DIVISOR); }
+  /** Exothermic Edge: live only while badly hurt, so catalysts move the threshold with you. */
   get exothermicActive() {
-    return this.hasLigand('exothermic') && this.elementHealth <= Math.ceil(this.maxHealth / 2);
+    return this.hasLigand('exothermic') && this.elementHealth <= this.exothermicThreshold;
   }
   /** Base ram damage before the damage catalyst. */
   get ramDamage() { return this.exothermicActive ? EXOTHERMIC_RAM_DAMAGE : RAM_DAMAGE; }
@@ -187,12 +217,19 @@ export class Game {
     this.atHut = false;
     this.showStartMarker = true;
 
-    for (let i = 0; i < INITIAL_ENEMIES; i++) this.spawnEnemy();
+    for (let i = 0; i < ENEMY_PRESSURE[this.currentElement].initial; i++) this.spawnEnemy();
     const p = this.randomFreeTile(2);
     if (p) this.photonTiles.push(p);
   }
 
   private takeHatch() {
+    if (this.projecting) { this.projectedExit = true; return; }
+    if (this.mode === 'tutorial') {
+      this.gameOver = true;
+      this.won = false;
+      this.setMessage('Practice hatch reached. Tutorial complete!', 'success');
+      return;
+    }
     this.gridsCleared++;
     if (this.currentElement === 'neon') {
       this.gameOver = true;
@@ -257,7 +294,7 @@ export class Game {
     return out;
   }
 
-  addFx(type: FxType, x: number, y: number) { this.pendingEffects.push({ type, x, y }); }
+  addFx(type: FxType, x: number, y: number, angle?: number) { this.pendingEffects.push({ type, x, y, angle }); }
   /**
    * A ligand fires inside `damagePlayer`, which callers follow with their own `setMessage`.
    * Queueing the line and appending it on the next message write is what stops the caller from
@@ -285,6 +322,7 @@ export class Game {
    */
   private damagePlayer(amount: number, source: DamageSource) {
     const healthBefore = this.elementHealth;
+    const shieldBefore = this.shieldPoints, savesBefore = this.supercooledFires;
     let remaining = amount;
     if (this.shieldPoints > 0) {
       const absorbed = Math.min(this.shieldPoints, remaining);
@@ -300,6 +338,12 @@ export class Game {
 
     if (this.elementHealth <= 0) this.trySupercooledSave(source);
     this.tryPassivation(healthBefore);
+    if (!this.projecting) {
+      this.history.damage.push({ turn: this.turn, grid: this.depth, source, amount, healthBefore,
+        healthAfter: this.elementHealth, absorbed: Math.min(shieldBefore, amount), saved: this.supercooledFires > savesBefore });
+      if (this.history.damage.length > 12) this.history.damage.shift();
+    }
+    this.onFrame?.(`Damage · ${source}${this.elementHealth < healthBefore ? ` −${healthBefore - this.elementHealth} HP` : " · absorbed"}`);
   }
 
   /**
@@ -310,13 +354,14 @@ export class Game {
     if (!this.supercooledReady || source === 'destabilise') return;
     this.supercooledUsedThisRun = true;
     this.supercooledFires++;
+    this.recordLigand('supercooled', 'Supercooled Core prevented a killing blow and froze adjacent enemies.');
     this.elementHealth = 1;
     let frozen = 0;
     for (const e of this.enemies) {
       if (e.encasedTurnsLeft > 0) continue;
       const near = ALL_EIGHT.some(([dx, dy]) => this.enemyTiles(e).some(t => t.x === this.playerPos.x + dx && t.y === this.playerPos.y + dy));
       if (!near) continue;
-      e.frozenTurnsLeft = Math.max(e.frozenTurnsLeft, SUPERCOOLED_FREEZE_TURNS);
+      this.freezeEnemy(e, SUPERCOOLED_FREEZE_TURNS);
       for (const t of this.enemyTiles(e)) this.addFx('frost', t.x, t.y);
       frozen++;
     }
@@ -342,6 +387,7 @@ export class Game {
     if (healthBefore <= PASSIVATION_THRESHOLD || this.elementHealth > PASSIVATION_THRESHOLD) return;
     this.passivationUsedThisGrid = true;
     this.passivationFiresThisGrid++;
+    this.recordLigand('passivation', 'Passivation Layer granted 2 shield after entering low health.');
     this.shieldPoints += PASSIVATION_SHIELD;
     this.addFx('shield', this.playerPos.x, this.playerPos.y);
     this.cue('shielded');
@@ -374,9 +420,11 @@ export class Game {
     this.gainPhotons(mult);
   }
   private damageEnemy(e: Enemy, amount: number): boolean {
+    if (this.projecting) this.projectedDamage.push({ id: e.id, amount });
     e.health -= amount;
-    if (e.health <= 0) { this.killEnemy(e); return true; }
+    if (e.health <= 0) { this.killEnemy(e); this.onFrame?.(e.invisibleTurnsLeft > 0 ? "Impact" : `${ENEMIES[e.type].symbol} destroyed`); return true; }
     this.cue('hit');
+    this.onFrame?.(e.invisibleTurnsLeft > 0 ? "Impact" : `${ENEMIES[e.type].symbol} −${amount} HP`);
     return false;
   }
   private dmg(base: number) { return base + this.damageBonus; }
@@ -417,15 +465,19 @@ export class Game {
   }
 
   private endTurn() {
+    if (this.projecting) { this.projectedTurnEnd = true; return; }
+    this.onFrame?.("Player action resolved");
     if (this.abilityLockedTurns > 0) this.abilityLockedTurns--;
     this.turn++;
     this.turnsOnGrid++;
     this.showStartMarker = false;
     this.enemyPhase = true;
+    this.onFrame?.("Enemy response");
     this.tickPolarity();
     if (!this.gameOver) this.moveEnemies();
+    this.onFrame?.("Status effects");
     if (!this.gameOver) this.tickPlayerStatus();
-    if (!this.gameOver) this.spawnPressure();
+    if (!this.gameOver && this.mode === 'run') this.spawnPressure();
     if (!this.gameOver) this.tickBattery();
     this.enemyPhase = false;
     this.movedThisTurn = false;
@@ -452,8 +504,8 @@ export class Game {
   }
 
   private spawnPressure() {
-    const floor = 2 + Math.min(3, Math.floor(this.depth / 2));
-    if (this.enemies.length < floor || (this.turn % 4 === 0 && this.enemies.length < MAX_ENEMIES)) {
+    const { floor, interval } = ENEMY_PRESSURE[this.currentElement];
+    if (this.enemies.length < floor || this.turn % interval === 0) {
       if (this.spawnEnemy()) this.note('🆕 A halogen arrived');
     }
     if (this.turn % 4 === 0 && this.photonTiles.length < 2) {
@@ -505,16 +557,19 @@ export class Game {
       this.setMessage(`💥 Shattered frozen ${sym}!`, 'success');
       return;
     }
-    const free = this.currentElement === 'beryllium' && this.shieldPoints > 0;
+    const paralyzed = e.paralyzed;
+    const free = paralyzed || (this.currentElement === 'beryllium' && this.shieldPoints > 0);
     this.cue('ram');
-    if (!free) this.damagePlayer(RAM_COST, 'ram');
     this.addFx('crush', at.x, at.y);
+    this.onFrame?.('Ram impact');
+    if (!free) this.damagePlayer(RAM_COST, 'ram');
     if (e.type === 'fluorine') { e.armed = false; e.explodeTiles = []; }
     const locks = e.type === 'bromine' && e.suppressedTurns <= 0;
     if (locks) this.lockAbilities();
+    if (this.exothermicActive) this.recordLigand('exothermic', 'Exothermic Edge added 1 ram damage.');
     const died = this.damageEnemy(e, this.dmg(this.ramDamage));
 
-    let msg = free ? `🛡️ Rammed ${sym} — the shield took it.` : `💢 Rammed ${sym} (-${RAM_COST}).`;
+    let msg = paralyzed ? `💢 Rammed paralyzed ${sym} — no self-damage.` : free ? `🛡️ Rammed ${sym} — the shield took it.` : `💢 Rammed ${sym} (-${RAM_COST}).`;
     if (died) msg += ` ${sym} destroyed!`;
     else msg += ` It has ${e.health} left.`;
     if (locks) msg += ' Its corrosion locks your abilities next turn.';
@@ -751,12 +806,20 @@ export class Game {
   }
 
   // ---- Helium ----
+  private freezeEnemy(e: Enemy, turns: number) {
+    e.frozenTurnsLeft = Math.max(e.frozenTurnsLeft, turns);
+    // Freeze cancels a prepared attack; thawed enemies must telegraph again.
+    e.armed = false; e.explodeTiles = [];
+    e.telegraph = false; e.telegraphTiles = [];
+    if (e.type === 'chlorine') e.poisonCooldown = Math.max(1, e.poisonCooldown);
+    this.refreshTelegraphs();
+  }
   private heliumFreeze(tier: 1 | 3) {
     const deltas = tier === 1 ? CARDINAL : ALL_EIGHT;
     const targets = this.enemies.filter(e => deltas.some(([dx, dy]) => this.enemyTiles(e).some(t => t.x === this.playerPos.x + dx && t.y === this.playerPos.y + dy)));
     if (!targets.length) { this.setMessage(`❄️ Nothing in the ${tier === 1 ? 4 : 8} tiles around you.`, 'warning'); return; }
     this.spendPhotons(tier);
-    for (const e of targets) { e.frozenTurnsLeft = tier === 1 ? 2 : 3; for (const t of this.enemyTiles(e)) this.addFx('frost', t.x, t.y); }
+    for (const e of targets) { this.freezeEnemy(e, tier === 1 ? 2 : 3); for (const t of this.enemyTiles(e)) this.addFx('frost', t.x, t.y); }
     this.setMessage(`❄️ Froze ${targets.length} target${targets.length === 1 ? '' : 's'}. Walk into a frozen body to shatter it.`, 'success');
     this.spendAbilitySlot();
   }
@@ -786,13 +849,16 @@ export class Game {
   /** Crosses voids and off-grid gaps: everything in the direction takes damage and loses its turn. */
   private doBeam() {
     const line = this.aimLine;
+    // Captured before the aim is cleared: the discharge is drawn along the line it travelled.
+    const along = this.aimDirection === 'left' || this.aimDirection === 'right' ? 90 : 0;
     this.clearAim();
     this.pendingEffects = [];
     this.spendPhotons(3);
     let killed = 0, paralyzed = 0, resisted = 0;
     const seen = new Set<number>();
+    for (const t of line) this.addFx('shock', t.x, t.y, along);
+    this.onFrame?.('Ion beam');
     for (const t of line) {
-      this.addFx('shock', t.x, t.y);
       const e = this.enemyAt(t.x, t.y);
       if (!e || seen.has(e.id)) continue;
       seen.add(e.id);
@@ -972,7 +1038,7 @@ export class Game {
     for (const e of [...this.enemies]) {
       for (const t of this.enemyTiles(e)) this.addFx('frost', t.x, t.y);
       if (this.damageEnemy(e, this.dmg(1))) { kills++; continue; }
-      e.frozenTurnsLeft = 1;
+      this.freezeEnemy(e, 1);
     }
     this.setMessage(`✨ All-out flash! Every halogen took 1 and is frozen for a round.${kills ? ` ${kills} destroyed.` : ''}`, 'success');
     this.spendAbilitySlot();
@@ -1003,6 +1069,9 @@ export class Game {
   buy(item: HutItem) {
     if (!this.atHut || !this.canBuy(item)) return;
     const price = this.hutPrice(item)!;
+    const names: Record<HutItem, string> = { evolve: 'Evolution', heal: 'Healing', healthCatalyst: 'Health catalyst', damageCatalyst: 'Damage catalyst' };
+    this.remember('purchase', `${names[item]}: ${price} photon${price === 1 ? '' : 's'}.`);
+    if (this.hutDiscount > 0) this.recordLigand('fractional', `Fractional Distillation saved 1 photon on ${names[item].toLowerCase()}.`);
     this.photons -= price;
     this.pendingEffects = [];
     if (item !== 'evolve') this.cue('buy');
@@ -1032,6 +1101,7 @@ export class Game {
     const next = EVOLUTION_CHAIN[this.currentElement];
     if (!next) return;
     const gained = ELEMENTS[next].health - ELEMENTS[this.currentElement].health;
+    this.remember('evolution', `${ELEMENTS[this.currentElement].symbol} → ${ELEMENTS[next].symbol}; health restored to ${ELEMENTS[next].health + this.maxHealthBonus}.`);
     this.currentElement = next;
     this.elementsVisited.push(next);
     this.cue('evolve');
@@ -1106,7 +1176,8 @@ export class Game {
   // =====================================================================
 
   private spawnEnemy(): boolean {
-    if (this.enemies.length >= MAX_ENEMIES) return false;
+    const population = this.enemies.reduce((sum, e) => sum + (e.bonded ? 2 : 1), 0);
+    if (population >= ENEMY_PRESSURE[this.currentElement].cap) return false;
     const p = this.randomFreeTile(2);
     if (!p) return false;
     const types: EnemyType[] = ['fluorine', 'chlorine', 'bromine', 'iodine'];
@@ -1127,6 +1198,7 @@ export class Game {
   }
 
   private planMove(e: Enemy) {
+    if (this.projecting) return; // Future direction is deliberately not predicted.
     const [dx, dy] = e.tetherTurnsLeft > 0 ? [0, 0] : this.decideMoveDelta(e);
     e.plannedDx = dx; e.plannedDy = dy;
   }
@@ -1168,7 +1240,7 @@ export class Game {
     const before = this.enemyTiles(e);
     e.x += dx; e.y += dy;
     if (e.bonded && e.x2 !== null && e.y2 !== null) { e.x2 += dx; e.y2 += dy; }
-    if (e.type === 'bromine' && e.bonded) for (const t of before) if (!this.trails.some(tr => same(tr, t))) this.trails.push({ x: t.x, y: t.y, turnsLeft: 3 });
+    if (e.type === 'bromine' && e.bonded) for (const t of before) if (!this.trails.some(tr => same(tr, t))) this.trails.push({ x: t.x, y: t.y, turnsLeft: 2 });
     if (e.fleeTurnsLeft > 0) e.fleeTurnsLeft--;
     this.planMove(e);
   }
@@ -1219,7 +1291,8 @@ export class Game {
     }
 
     // detonations
-    for (const e of this.enemies.filter(x => x.type === 'fluorine' && x.armed)) {
+    for (const e of this.enemies.filter(x => x.type === 'fluorine' && x.armed && x.frozenTurnsLeft <= 0)) {
+      if (!e.armed || e.frozenTurnsLeft > 0) continue; // An earlier blast may have triggered Supercooled Core.
       for (const t of e.explodeTiles) this.addFx('explosion', t.x, t.y);
       if (e.explodeTiles.some(t => same(t, this.playerPos))) {
         this.damagePlayer(2, 'explosion');
@@ -1262,6 +1335,7 @@ export class Game {
       else if (e.type === 'fluorine') this.actFluorine(e);
       else if (e.type === 'iodine') this.actIodine(e);
       else this.resolveMove(e);
+      if (e.invisibleTurnsLeft <= 0) this.onFrame?.(`${ENEMIES[e.type].symbol} response`);
       if (this.gameOver) return;
     }
     for (const e of this.enemies) if (e.suppressedTurns > 0) e.suppressedTurns--;

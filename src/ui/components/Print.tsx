@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import { fonts, theme } from '../theme';
 import { tapFeedback } from '../haptics';
@@ -25,14 +25,15 @@ export function Caption({ children, style }: { children: React.ReactNode; style?
 
 export type ButtonVariant = 'outline' | 'primary' | 'highlight' | 'danger' | 'muted';
 
-export function PaperButton({ label, onPress, variant = 'outline', disabled, style, big }: {
-  label: string; onPress: () => void; variant?: ButtonVariant; disabled?: boolean; style?: StyleProp<ViewStyle>; big?: boolean;
+export function PaperButton({ label, onPress, variant = 'outline', disabled, style, big, onLongPress }: {
+  label: string; onPress: () => void; onLongPress?: () => void; variant?: ButtonVariant; disabled?: boolean; style?: StyleProp<ViewStyle>; big?: boolean;
 }) {
   const v = disabled ? variants.disabled : variants[variant];
   // Every button ticks. Anything the press causes — a hit, a kill, damage taken — thumps after it.
-  const press = () => { tapFeedback(); onPress(); };
+  const held = useRef(false);
+  const press = () => { if (held.current) { held.current = false; return; } tapFeedback(); onPress(); };
   return (
-    <Pressable onPress={press} disabled={disabled} accessibilityRole="button" accessibilityState={{ disabled }}
+    <Pressable onPressIn={() => { held.current = false; }} onLongPress={onLongPress ? () => { held.current = true; onLongPress(); } : undefined} delayLongPress={350} accessibilityHint={onLongPress ? "Hold for an action preview" : undefined} onPress={press} disabled={disabled} accessibilityRole="button" accessibilityState={{ disabled }}
       style={({ pressed }) => [styles.btn, { backgroundColor: v.bg, borderColor: v.border, borderStyle: disabled ? 'dashed' : 'solid', opacity: pressed ? 0.7 : 1 }, style]}>
       <Text style={[styles.btnText, big && styles.btnBig, { color: v.fg }]}>{label}</Text>
     </Pressable>

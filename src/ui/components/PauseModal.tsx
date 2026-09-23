@@ -7,16 +7,15 @@ import { useGameStore } from '@/store/gameStore';
 import type { Game } from '@/game/engine';
 
 /**
- * Pause, quick reference, and the two ways out of a run. Quitting and restarting both throw the
- * run away, so each asks once before it does.
+ * Pause, quick reference, and the two ways out of a run. Leaving preserves a normal run; restarting
+ * replaces it and asks for confirmation.
  */
 export function PauseModal({ game }: { game: Game }) {
-  const { paused, resume, retry, toMenu, hapticsOn, toggleHaptics } = useGameStore();
-  const [confirming, setConfirming] = useState<'quit' | 'restart' | null>(null);
+  const { paused, resume, retry, toMenu, hapticsOn, toggleHaptics, tutorial, saveAndExit } = useGameStore();
+  const [confirming, setConfirming] = useState<'restart' | null>(null);
 
   const close = () => { setConfirming(null); resume(); };
   const doRetry = () => { setConfirming(null); retry(); };
-  const doQuit = () => { setConfirming(null); toMenu(); };
 
   return (
     <Modal visible={paused && !game.gameOver} transparent animationType="fade" onRequestClose={close}>
@@ -39,23 +38,21 @@ export function PauseModal({ game }: { game: Game }) {
             <View style={styles.stack}>
               <PaperButton label="Resume ▸" variant="primary" onPress={close} />
               <PaperButton label={`Haptics: ${hapticsOn ? 'on' : 'off'}`} variant="outline" onPress={toggleHaptics} />
-              <PaperButton label="Restart run" variant="outline" onPress={() => setConfirming('restart')} />
-              <PaperButton label="Quit to contents" variant="muted" onPress={() => setConfirming('quit')} />
+              <PaperButton label={tutorial ? "Reset lesson" : "Restart run"} variant="outline" onPress={() => setConfirming('restart')} />
+              <PaperButton label={tutorial ? "Leave tutorial" : "Save & main menu"} variant="muted" onPress={tutorial ? toMenu : saveAndExit} />
             </View>
           ) : (
             <View style={styles.stack}>
               <Text style={styles.confirm}>
-                {confirming === 'restart'
-                  ? 'Restart from Hydrogen on a new grid 1? This run is lost.'
-                  : 'Leave this run and go back to the contents? This run is lost.'}
+                {tutorial ? 'Reset this practice room? Your profile is unchanged.' : 'Restart from Hydrogen on a new grid 1? This replaces your saved run.'}
               </Text>
               <View style={styles.row}>
                 <PaperButton label="Keep playing" variant="outline" style={{ flex: 1 }} onPress={() => setConfirming(null)} />
                 <PaperButton
-                  label={confirming === 'restart' ? 'Restart' : 'Quit'}
+                  label="Restart"
                   variant="danger"
                   style={{ flex: 1 }}
-                  onPress={confirming === 'restart' ? doRetry : doQuit}
+                  onPress={doRetry}
                 />
               </View>
             </View>

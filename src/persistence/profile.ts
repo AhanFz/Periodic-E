@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LIGANDS } from '@/game/constants';
+import { restoreRun, type RunSave } from '@/game/runSave';
 import type { LigandId } from '@/game/types';
 
 /**
@@ -67,44 +68,46 @@ export function migrate(raw: unknown): Profile {
   };
 }
 
-/** Never rejects. A profile that cannot be read is a fresh profile, not a crash on launch. */
-export async function loadProfile(): Promise<Profile> {
-  try {
-    const stored = await AsyncStorage.getItem(KEY);
-    if (stored === null) return defaultProfile();
-    return migrate(JSON.parse(stored));
-  } catch {
-    return defaultProfile();
-  }
+/** Profile and active run are one atomic checkpoint: a completed run cannot be rewarded twice. */
+const SESSION_KEY = 'element-evolution/session/v1';
+export interface SavedSession { version: 1; profile: Profile; active: RunSave | null; }
+let current: SavedSession = { version: 1, profile: defaultProfile(), active: null };
+let writes: Promise<boolean> = Promise.resolve(true);
+let loadPromise: Promise<SavedSession> | null = null;
+let failed = false;
+export function loadSession(): Promise<SavedSession> {
+  if (!loadPromise) loadPromise = (async () => {
+    try {
+      const saved = await AsyncStorage.getItem(SESSION_KEY);
+      if (saved !== null) {
+        const value = JSON.parse(saved);
+        if (value?.version === 1) current = {
+          version: 1, profile: migrate(value.profile), active: restoreRun(value.active) ? value.active : null,
+        };
+      } else {
+        const legacy = await AsyncStorage.getItem(KEY);
+        current.profile = legacy === null ? defaultProfile() : migrate(JSON.parse(legacy));
+      }
+    } catch { /* Defaults preserve a usable app when storage is unavailable or corrupt. */ }
+    return current;
+  })();
+  return loadPromise;
 }
-
-let writeTimer: ReturnType<typeof setTimeout> | null = null;
-let queued: Profile | null = null;
-const WRITE_DELAY_MS = 400;
-
-/**
- * Coalesces bursts of writes into one. Equipping a ligand can fire several state updates in a
- * frame, and none of them need their own trip to disk.
- */
-export function saveProfile(p: Profile): void {
-  queued = p;
-  if (writeTimer) return;
-  writeTimer = setTimeout(() => {
-    writeTimer = null;
-    const toWrite = queued;
-    queued = null;
-    if (!toWrite) return;
-    AsyncStorage.setItem(KEY, JSON.stringify(toWrite)).catch(() => {});
-  }, WRITE_DELAY_MS);
+export async function loadProfile(): Promise<Profile> { return (await loadSession()).profile; }
+/** Called per completed action or menu purchase, never per animation frame. Writes remain ordered. */
+export function saveSession(profile: Profile, active: RunSave | null): Promise<boolean> {
+  current = { version: 1, profile, active };
+  const payload = JSON.stringify(current);
+  writes = writes.then(async () => {
+    try { await AsyncStorage.setItem(SESSION_KEY, payload); failed = false; return true; }
+    catch { failed = true; return false; }
+  });
+  return writes;
 }
-
-/** Forces any queued write out immediately; used when the app is going away. */
+export function saveProfile(profile: Profile): void { void saveSession(profile, current.active); }
 export async function flushProfile(): Promise<void> {
-  if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
-  const toWrite = queued;
-  queued = null;
-  if (!toWrite) return;
-  try { await AsyncStorage.setItem(KEY, JSON.stringify(toWrite)); } catch { /* storage is best effort */ }
+  await writes;
+  if (failed) await saveSession(current.profile, current.active);
 }
 
 // ---------------------------------------------------------------------------

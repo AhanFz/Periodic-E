@@ -1,28 +1,17 @@
-import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { ConfirmModal } from '../components/ConfirmModal';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Caption, PaperButton, Rule, SectionLabel } from '../components/Print';
 import { fonts, theme } from '../theme';
-import { ATOMIC_MASS, ATOMIC_NUMBER, ELEMENTS, ELEMENT_COLORS, ELEMENT_NAMES, ELEMENT_ORDER, LIGANDS, QUANTA_GLYPH } from '@/game/constants';
+import { LIGANDS, QUANTA_GLYPH } from '@/game/constants';
 import { useGameStore } from '@/store/gameStore';
-import type { ElementKey } from '@/game/types';
-
-/** A periodic-table cell: atomic number, symbol, name, mass, with the element's colour as a header band. */
-function ElementCell({ element, onPress }: { element: ElementKey; onPress: () => void }) {
-  const d = ELEMENTS[element];
-  return (
-    <Pressable style={({ pressed }) => [styles.cell, pressed && { opacity: 0.75 }]} onPress={onPress}>
-      <View style={[styles.band, { backgroundColor: ELEMENT_COLORS[element] }]} />
-      <Text style={styles.z}>{ATOMIC_NUMBER[element]}</Text>
-      {d.noble && <Text style={styles.dagger}>†</Text>}
-      <Text style={styles.symbol}>{d.symbol}</Text>
-      <Text style={styles.name}>{ELEMENT_NAMES[element]}</Text>
-      <Text style={styles.mass}>{ATOMIC_MASS[element]}</Text>
-      <Text style={styles.kit}>{d.ability1Short} · {d.ability2Short}</Text>
-    </Pressable>
-  );
-}
 
 export function LevelSelectScreen() {
+  const [replace, setReplace] = useState(false);
+  const { savedRun, continueRun, saveWarning } = useGameStore();
+  const toCatalogue = useGameStore(s => s.toCatalogue);
+  const toTutorial = useGameStore(s => s.toTutorial);
+  const profileLoaded = useGameStore(s => s.profileLoaded);
   const startGame = useGameStore(s => s.startGame);
   const toStore = useGameStore(s => s.toStore);
   const profile = useGameStore(s => s.profile);
@@ -47,13 +36,18 @@ export function LevelSelectScreen() {
         <PaperButton label={`Ligands · ${QUANTA_GLYPH} ${profile.quanta}`} variant="highlight" onPress={toStore} />
       </View>
 
-      <PaperButton label="Begin at Chapter 1 — Hydrogen" variant="primary" onPress={() => startGame('hydrogen')} style={styles.primary} />
+      {savedRun && <View style={{ gap: 6, marginBottom: 14 }}>
+        <PaperButton label={`Continue · ${savedRun.elementData.symbol} · Grid ${savedRun.depth}`} variant="primary" onPress={continueRun} />
+        <Caption>Turn {savedRun.turn} · Health {savedRun.elementHealth}/{savedRun.maxHealth} · {savedRun.photons} photons</Caption>
+      </View>}
+      {saveWarning && <Text style={{ color: theme.red, marginBottom: 12 }}>{saveWarning}</Text>}
+      <PaperButton label={savedRun ? 'Start a new run · Hydrogen' : 'Begin at Chapter 1 — Hydrogen'} variant="primary" disabled={!profileLoaded} onPress={() => savedRun ? setReplace(true) : startGame()} style={styles.primary} />
 
-      <SectionLabel style={{ marginBottom: 8 }}>Table of contents · practice any element</SectionLabel>
-      <View style={styles.grid}>
-        {ELEMENT_ORDER.map(key => <ElementCell key={key} element={key} onPress={() => startGame(key)} />)}
-      </View>
-      <Caption style={{ marginTop: 10 }}>† Noble gas: must reach the hatch within a turn limit or destabilise.</Caption>
+      <PaperButton label="Playable tutorial" variant="outline" onPress={toTutorial} />
+      <Caption style={{ marginTop: 10 }}>Learn by playing. Try any element and any ligand for free. Normal runs always begin as Hydrogen.</Caption>
+      <PaperButton label="Chemistry Catalogue" variant="outline" onPress={toCatalogue} style={{ marginTop: 20 }} />
+      <Caption style={{ marginTop: 8 }}>Meet every element and halogen. Discover the chemistry behind their abilities.</Caption>
+      <ConfirmModal visible={replace} title="Replace your saved run?" body="Starting a new run replaces your unfinished run. Your quanta and ligands stay saved." confirmLabel="Start new run" cancelLabel="Keep saved run" onCancel={() => setReplace(false)} onConfirm={() => { setReplace(false); startGame(); }} />
     </ScrollView>
   );
 }
@@ -72,13 +66,4 @@ const styles = StyleSheet.create({
   ligandLabel: { fontFamily: fonts.serif, fontSize: 9, letterSpacing: 1, textTransform: 'uppercase', color: theme.textDim },
   ligandName: { fontFamily: fonts.serif, fontSize: 14, fontWeight: '700', color: theme.accent, marginTop: 2 },
   ligandNone: { color: theme.textDim, fontWeight: '400', fontStyle: 'italic' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' },
-  cell: { width: '30%', minWidth: 100, backgroundColor: theme.panel, borderWidth: 1, borderColor: theme.ink, paddingTop: 10, paddingBottom: 8, paddingHorizontal: 6, alignItems: 'center', overflow: 'hidden' },
-  band: { position: 'absolute', top: 0, left: 0, right: 0, height: 5 },
-  z: { position: 'absolute', top: 8, left: 7, fontFamily: fonts.mono, fontSize: 10, color: theme.textDim },
-  dagger: { position: 'absolute', top: 6, right: 8, fontFamily: fonts.serif, fontSize: 12, color: theme.accent },
-  symbol: { fontFamily: fonts.serif, fontSize: 32, fontWeight: '700', color: theme.ink, marginTop: 6 },
-  name: { fontFamily: fonts.serif, fontSize: 12, color: theme.ink },
-  mass: { fontFamily: fonts.mono, fontSize: 10, color: theme.textDim, marginTop: 1 },
-  kit: { fontFamily: fonts.serif, fontStyle: 'italic', fontSize: 10, color: theme.textDim, marginTop: 5 },
 });

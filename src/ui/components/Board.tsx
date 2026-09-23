@@ -9,7 +9,7 @@ import { useGameStore } from '@/store/gameStore';
 import type { Game } from '@/game/engine';
 import type { InspectTarget } from '@/game/types';
 
-interface Props { game: Game; tick: number; }
+interface Props { game: Game; tick: number; maxHeight?: number; maxWidth?: number; compact?: boolean; inert?: boolean; }
 
 /** Tile gaps show the graph-paper colour underneath, so they read as ruled lines. */
 const GAP = 2;
@@ -18,7 +18,7 @@ const FRAME_PAD = 8;
 const SCREEN_PAD = 16;
 const BLEED = 6;
 
-export function Board({ game, tick }: Props) {
+export function Board({ game, tick, maxHeight = 1000, maxWidth = 560, compact = false, inert = false }: Props) {
   const { width } = useWindowDimensions();
   const inspect = useGameStore(s => s.inspect);
   const onInspect = (target: InspectTarget) => { tapFeedback(); inspect(target); };
@@ -26,16 +26,16 @@ export function Board({ game, tick }: Props) {
   const cols = view.cols;
   const rowCount = view.rows.length;
 
-  const figureWidth = Math.min(width - (SCREEN_PAD - BLEED) * 2, 560);
+  const figureWidth = Math.min(width - (SCREEN_PAD - BLEED) * 2, maxWidth);
   const inner = figureWidth - 2 - FRAME_PAD * 2;
-  const cell = Math.max(28, Math.floor((inner - GAP * (cols - 1)) / cols));
+  const cell = Math.max(12, Math.floor(Math.min((inner - GAP * (cols - 1)) / cols, (maxHeight - 24 - (view.polarityCountdown !== null ? 25 : 0) - GAP * (rowCount - 1)) / rowCount)));
   const latticeW = cell * cols + GAP * (cols - 1);
   const latticeH = cell * rowCount + GAP * (rowCount - 1);
   const n = view.size;
   const polarised = view.polarityCountdown !== null;
 
   return (
-    <View style={[styles.figure, { width: figureWidth }]}>
+    <View style={[styles.figure, { width: figureWidth }, compact && { marginTop: 0, marginBottom: 0 }]}>
       <View style={[styles.frame, { padding: FRAME_PAD }]}>
         {polarised && (
           <View style={styles.annotRow}>
@@ -47,7 +47,7 @@ export function Board({ game, tick }: Props) {
             <View key={y} style={[styles.row, { marginBottom: y < rowCount - 1 ? GAP : 0 }]}>
               {row.map((t, x) => (
                 <View key={t.key} style={{ marginRight: x < row.length - 1 ? GAP : 0 }}>
-                  <Tile tile={t} size={cell} tick={tick} onInspect={onInspect} />
+                  <Tile tile={t} size={cell} tick={tick} onInspect={inert ? undefined : onInspect} />
                 </View>
               ))}
             </View>
@@ -55,6 +55,7 @@ export function Board({ game, tick }: Props) {
         </View>
       </View>
 
+      {!compact && <>
       <Caption style={styles.caption}>
         <Text style={styles.captionLead}>Figure {game.depth}.</Text> Reaction chamber — {game.layout.shape} layout, {n} × {n}{polarised ? ', polarised field' : ''}.
       </Caption>
@@ -69,6 +70,7 @@ export function Board({ game, tick }: Props) {
         <Text style={styles.legendItem}><Text style={{ color: theme.playerElectron }}>◎</Text> where you started</Text>
       </View>
       <Caption style={styles.hint}>Hold any atom for its card: what it does, what it is about to do, and how to beat it.</Caption>
+      </>}
     </View>
   );
 }
