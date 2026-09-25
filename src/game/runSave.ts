@@ -2,7 +2,7 @@ import { Game } from './engine';
 import { ELEMENT_ORDER, LIGAND_ORDER } from './constants';
 import { floodFill } from './grid';
 
-export interface RunSave { version: 1; state: Record<string, unknown>; }
+export interface RunSave { version: 2; state: Record<string, unknown>; }
 type Check = (value: unknown) => boolean;
 const number: Check = v => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= 1000000;
 const count: Check = v => number(v) && Number.isInteger(v) && (v as number) >= 0;
@@ -33,6 +33,7 @@ const fields: Record<string, Check> = {
   supercooledUsedThisRun: bool, supercooledFires: count, gridSize: one([5, 6, 7]), playerPos: pos,
   turn: count, turnsOnGrid: count, stageKills: count, nextEnemyId: count, shieldPoints: count,
   poisonImmune: bool, abilityLockedTurns: count, playerPoisonTurns: count, batteryTurnsLeft: count,
+  fractionalUsedThisGrid: bool,
   passivationUsedThisGrid: bool, passivationFiresThisGrid: count, hutVisitsThisGrid: count,
   movedThisTurn: bool, usedAbilityThisTurn: bool, enemyPhase: one([false]),
   layout: object({ size: one([5, 6, 7]), shape: one(['plain', 'void', 'split', 'eroded']), passable: list(list(bool, 7), 7), start: pos, hut: pos, hatch: pos, polarity: bool }),
@@ -54,14 +55,19 @@ const fields: Record<string, Check> = {
 /** No storage, constructor, grid generation or RNG. Transient animations are deliberately excluded. */
 export function saveRun(g: Game): RunSave {
   const all = JSON.parse(JSON.stringify(g)) as Record<string, unknown>;
-  return { version: 1, state: Object.fromEntries(Object.keys(fields).map(key => [key, all[key]])) };
+  return { version: 2, state: Object.fromEntries(Object.keys(fields).map(key => [key, all[key]])) };
 }
 /** Version changes must migrate explicitly. Invalid snapshots are ignored, never partially applied. */
 export function restoreRun(raw: unknown): Game | null {
   try {
     if (!raw || typeof raw !== 'object') return null;
-    const envelope = raw as RunSave;
-    if (envelope.version !== 1 || !object(fields)(envelope.state)) return null;
+    const input = raw as { version: number; state: Record<string, unknown> };
+    // Legacy saves had unlimited first-visit discounts. Conservatively mark any
+    // already-visited hut as spent; never grant a fresh discount on reloading.
+    const envelope = input.version === 1 && input.state && typeof input.state === 'object'
+      ? { version: 2, state: { ...input.state, fractionalUsedThisGrid: typeof input.state.hutVisitsThisGrid === 'number' && input.state.hutVisitsThisGrid > 0 } }
+      : input;
+    if (envelope.version !== 2 || !object(fields)(envelope.state)) return null;
     const state = JSON.parse(JSON.stringify(envelope.state)) as Record<string, unknown>;
     const g = Object.assign(Object.create(Game.prototype), Object.fromEntries(Object.keys(fields).map(key => [key, state[key]]))) as Game;
     g.pendingEffects = []; g.hapticCues = []; g.projecting = false; g.projectedDamage = [];

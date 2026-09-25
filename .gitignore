@@ -6,3 +6,7 @@ dist/
 .sim-out/
 
 .preview/
+
+# Compiled-engine snapshots used for balance comparison; regenerable
+# from git history via `npm run sim`. Raw results JSON stays tracked.
+sim/baselines/*.tar.gz

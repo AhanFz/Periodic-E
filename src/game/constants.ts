@@ -53,8 +53,8 @@ export const ELEMENTS: Record<ElementKey, ElementDef> = {
   },
   beryllium: {
     symbol: 'Be', health: ELEMENT_HEALTH.beryllium, noble: false,
-    ability1Short: 'Shield', ability1Name: 'Shield', ability1Desc: '+2 shield. While any shield holds, ramming costs you no health; the shield only absorbs incoming hits.', ability1Cost: 1,
-    ability2Short: 'Shield+', ability2Name: 'Inert Shield', ability2Desc: '+3 shield. Free ramming while it holds, and poison cannot touch you.', ability2Cost: 3,
+    ability1Short: 'Shield', ability1Name: 'Shield', ability1Desc: 'Raise shield to at least 2. While any shield holds, ramming costs you no health; the shield only absorbs incoming hits.', ability1Cost: 1,
+    ability2Short: 'Shield+', ability2Name: 'Inert Shield', ability2Desc: 'Raise shield to at least 3. Free ramming while it holds, and poison cannot touch you.', ability2Cost: 3,
   },
   boron: {
     symbol: 'B', health: ELEMENT_HEALTH.boron, noble: false,
@@ -64,7 +64,7 @@ export const ELEMENTS: Record<ElementKey, ElementDef> = {
   carbon: {
     symbol: 'C', health: ELEMENT_HEALTH.carbon, noble: false,
     ability1Short: 'Sheet', ability1Name: 'Graphene Sheet', ability1Desc: 'C-shaped bridge off an edge or over void. Collapses in 3 turns, killing enemies on it.', ability1Cost: 1,
-    ability2Short: 'Spear', ability2Name: 'Diamond Spear', ability2Desc: 'Forge a piercing spear: 3 dmg per hit, range 4, 4 durability, each hit costs 2. Throw free, pick it up, throw again.', ability2Cost: 3,
+    ability2Short: 'Spear', ability2Name: 'Diamond Spear', ability2Desc: 'Forge a piercing spear: 3 dmg per hit, range 4, 4 durability, each hit costs 2. Forge and throw in one turn. Throwing costs no photons and spends the ability action; pick it up to reuse.', ability2Cost: 3,
   },
   nitrogen: {
     symbol: 'N', health: ELEMENT_HEALTH.nitrogen, noble: false,
@@ -100,6 +100,7 @@ export const EVOLVE_MIN_PRICE = 1;
 export const HEAL_PRICE = 2;
 export const HEAL_AMOUNT = 2;
 export const CATALYST_PRICE = 3;
+export const CATALYST_LIMIT = 3;
 
 export const VALENCE: Record<ElementKey, number> = {
   hydrogen: 1, helium: 2, lithium: 1, beryllium: 2, boron: 3, carbon: 4, nitrogen: 5, oxygen: 6, neon: 8,
@@ -121,7 +122,7 @@ export const ENEMY_COLORS: Record<EnemyType, string> = {
 export const ENEMIES: Record<EnemyType, EnemyDef> = {
   fluorine: {
     symbol: 'F', health: 2,
-    desc: 'Arms near you, explodes next turn. No credit for its own detonation.',
+    desc: 'Arms near you, explodes on its next active turn. Paralysis/tether pause the fuse; freeze cancels it. No credit for its own detonation.',
     tell: '💣 on its tile, and the blast tiles glow orange.',
     counter: 'Ram it the turn it arms — a ram defuses it and 2 damage is enough to finish it.',
   },
@@ -165,7 +166,7 @@ export const LIGANDS: Record<LigandId, LigandDef> = {
   fractional: {
     name: 'Fractional Distillation',
     flavour: 'Separating a mixture by boiling point is cheaper than separating it by force.',
-    description: 'Everything costs 1 photon less during your first visit to each grid\u2019s hut, evolution included.',
+    description: 'One purchase during your first hut visit each grid costs 1 photon less. Minimum price 1, including evolution.',
     price: 50,
   },
   exothermic: {
@@ -185,7 +186,7 @@ export const PASSIVATION_SHIELD = 2;
 export const PASSIVATION_THRESHOLD = 2;
 /** Supercooled Core freezes every neighbour for this many turns as it saves you. */
 export const SUPERCOOLED_FREEZE_TURNS = 2;
-/** Fractional Distillation takes this much off every price during a grid's first hut visit. */
+/** Fractional Distillation takes this much off one purchase during a grid's first hut visit. */
 export const HUT_DISCOUNT = 1;
 /** Exothermic Edge replaces the ram's base damage while you are hurt badly enough. */
 export const EXOTHERMIC_RAM_DAMAGE = 3;

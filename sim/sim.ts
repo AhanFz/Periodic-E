@@ -48,7 +48,7 @@ function assertInvariants(g: Game) {
     if (e.bonded && (e.x2 === null || e.y2 === null)) throw new Error('bonded without second tile');
     if (e.bonded && Math.abs(e.x - e.x2!) + Math.abs(e.y - e.y2!) !== 1) throw new Error('molecule not adjacent');
     if (e.tetherTurnsLeft > 0 && !g.enemyTiles(e).some(t => adjacent(t, g.playerPos))) throw new Error('tethered enemy not adjacent to player');
-    if (e.tetherTurnsLeft > 0 && (e.armed || e.telegraph)) throw new Error('tethered enemy has an active special');
+    if (e.tetherTurnsLeft > 0 && (e.telegraph || (e.armed && e.type !== 'fluorine'))) throw new Error('tethered enemy has an active special');
   }
   const occ = new Set<string>();
   for (const e of g.enemies) for (const t of g.enemyTiles(e)) { const k = `${t.x},${t.y}`; if (occ.has(k)) throw new Error('enemy overlap at ' + k); occ.add(k); }
@@ -69,8 +69,8 @@ function mkEnemy(g: Game, type: EnemyType, x: number, y: number): Enemy {
   return e;
 }
 /** A fresh 5x5 plain grid with nothing on it; player at the left edge of the middle row. */
-function blank(element: ElementKey, ligand: LigandId | null = null): Game {
-  const g = new Game(element, ligand);
+function blank(element: ElementKey, ligand: LigandId | null = null, mode: 'run' | 'tutorial' = 'run'): Game {
+  const g = new Game(element, ligand, mode);
   g.enemies = []; g.photonTiles = []; g.dopantTraps = []; g.scorchedTiles = [];
   g.layout.hut = { x: 4, y: 4 }; g.layout.hatch = { x: 4, y: 0 };
   g.playerPos = { x: 0, y: 2 };
@@ -194,22 +194,24 @@ function runScenarios() {
     g.movePlayer(0, -1);
     expect(g.turn === 1 && !g.movedThisTurn && !g.usedAbilityThisTurn, 'move after ability ended the turn and reset flags');
   }
-  // Trapped enemies lose their special: a Fluorine that arms as it lands on a trap is defused and never detonates.
+  // A trap pauses an armed Fluorine for its paralyzed turn; it detonates after recovery.
   {
-    const g = blank('boron');
+    const g = blank('boron', null, 'tutorial'); // Isolate status timing from reinforcement attacks.
     g.playerPos = { x: 1, y: 2 };
     g.dopantTraps.push({ x: 2, y: 2, turnsLeft: 3 });
     const f = mkEnemy(g, 'fluorine', 3, 2); f.plannedDx = -1;
     g.passTurn();
-    expect(f.x === 2 && f.paralyzed && !f.armed && f.explodeTiles.length === 0, 'trapped fluorine is paralyzed and defused: ' + JSON.stringify({ x: f.x, paralyzed: f.paralyzed, armed: f.armed }));
+    expect(f.x === 2 && f.paralyzed && f.armed && f.explodeTiles.length > 0, 'trapped fluorine keeps a paused fuse: ' + JSON.stringify({ x: f.x, paralyzed: f.paralyzed, armed: f.armed }));
     expect(f.health === 1, 'the trap burned it for 1, got ' + f.health);
     const hp = g.elementHealth;
     g.passTurn();
-    expect(g.enemies.includes(f) && g.elementHealth === hp, 'defused fluorine did not detonate');
+    expect(g.enemies.includes(f) && g.elementHealth === hp, 'paused fluorine did not detonate');
+    g.passTurn();
+    expect(!g.enemies.includes(f) && g.elementHealth === hp-2, 'recovered fuse detonated');
   }
   // A Bromine that takes a trap has its contact lock suppressed for a turn.
   {
-    const g = blank('boron');
+    const g = blank('boron', null, 'tutorial'); // Isolate status timing from reinforcement attacks.
     g.playerPos = { x: 1, y: 2 };
     g.dopantTraps.push({ x: 2, y: 2, turnsLeft: 3 });
     const br = mkEnemy(g, 'bromine', 3, 2); br.plannedDx = -1;
@@ -565,9 +567,11 @@ function bfsToward(g: Game, isGoal: (p: Pos) => boolean, avoidEnemies = false): 
 /** Once an ability fails to resolve in a turn (cancelled aim, no valid target), stop retrying it that turn. */
 let abilityGivenUpAt = -1;
 
-function sensibleStep(g: Game) {
+function sensibleStep(g: Game, shopAware = false) {
   lastActionWasRam = false;
   if (g.atHut) {
+    if (shopAware && g.damageBonus < 2 && g.canBuy('damageCatalyst')) { g.buy('damageCatalyst'); stats.hutBuys++; return; }
+    if (shopAware && g.maxHealthBonus < 4 && g.canBuy('healthCatalyst')) { g.buy('healthCatalyst'); stats.hutBuys++; return; }
     if (g.canBuy('evolve')) { g.buy('evolve'); stats.hutBuys++; return; }
     if (g.canBuy('heal') && g.elementHealth * 2 <= g.maxHealth) { g.buy('heal'); stats.hutBuys++; return; }
     g.leaveHut(); return;
@@ -608,7 +612,7 @@ function sensibleStep(g: Game) {
   if (!g.movedThisTurn) {
     let d: [number, number] | null = null;
     if (adj.length && healthy) d = [adj[0][0], adj[0][1]];
-    else if (g.evolvePrice !== null && g.photons >= g.evolvePrice) d = bfsToward(g, p => same(p, g.layout.hut), !healthy) ?? (healthy ? null : bfsToward(g, p => same(p, g.layout.hatch), true));
+    else if (g.hutPrice('evolve') !== null && g.photons >= g.hutPrice('evolve')!) d = bfsToward(g, p => same(p, g.layout.hut), !healthy) ?? (healthy ? null : bfsToward(g, p => same(p, g.layout.hatch), true));
     else if (healthy && g.enemies.length) d = bfsToward(g, p => !!g.enemyAt(p.x, p.y));
     else d = bfsToward(g, p => same(p, g.layout.hatch), !healthy);
     if (d) {
@@ -724,15 +728,21 @@ interface ConfigResult {
   totalKills: number;
   passivationFires: number;
   supercooledSaves: number;
+  unfinished: number;
+  avgEvolutions: number;
+  avgCatalysts: number;
 }
 
-function runConfig(ligand: LigandId | null, runs: number, maxSteps: number): ConfigResult {
+export function runConfig(ligand: LigandId | null, runs: number, maxSteps: number, hydrogenOnly = false, beforeRun?: (run: number) => void, shopAware = false): ConfigResult {
   let wins = 0, totalKills = 0, totalDepth = 0, passivationFires = 0, supercooledSaves = 0, ramKills = 0;
+  let unfinished=0, evolutions=0, catalysts=0;
   const killsByElement: Record<string, number> = {};
   for (let run = 0; run < runs; run++) {
-    const start = ELEMENT_ORDER[run % ELEMENT_ORDER.length];
+    beforeRun?.(run);
+    const start = hydrogenOnly ? 'hydrogen' : ELEMENT_ORDER[run % ELEMENT_ORDER.length];
     const g = new Game(start, ligand);
     let banked = 0;
+    aimTier = null;
     abilityGivenUpAt = -1;
     for (let step = 0; step < maxSteps && !g.gameOver; step++) {
       const el = g.currentElement, killsBefore = g.totalKills;
@@ -740,7 +750,7 @@ function runConfig(ligand: LigandId | null, runs: number, maxSteps: number): Con
       // bank it if this step turned out to be the one that changed grid.
       const firesBefore = g.passivationFiresThisGrid, depthBefore = g.depth;
       try {
-        sensibleStep(g);
+        sensibleStep(g,shopAware);
         assertInvariants(g);
       } catch (err) {
         console.error('FAILED', ligand ?? 'none', 'run', run, 'step', step, (err as Error).message);
@@ -754,6 +764,8 @@ function runConfig(ligand: LigandId | null, runs: number, maxSteps: number): Con
       }
     }
     if (g.won) wins++;
+    if (!g.gameOver) unfinished++;
+    evolutions+=g.elementsVisited.length-1; catalysts+=g.maxHealthBonus/2+g.damageBonus;
     totalKills += g.totalKills;
     totalDepth += g.depth;
     supercooledSaves += g.supercooledFires;
@@ -768,7 +780,7 @@ function runConfig(ligand: LigandId | null, runs: number, maxSteps: number): Con
     ramKills,
     totalKills,
     passivationFires,
-    supercooledSaves,
+    supercooledSaves, unfinished, avgEvolutions:evolutions/runs, avgCatalysts:catalysts/runs,
   };
 }
 
@@ -813,6 +825,9 @@ function resetStats() {
 
 // =====================================================================
 
+declare const require: { main: unknown };
+declare const module: unknown;
+if (require.main === module) {
 runScenarios();
 runTutorialScenarios();
 runPresentationScenarios();
@@ -833,3 +848,5 @@ reportComparison([
   runConfig(null, 600, 600),
   ...LIGAND_ORDER.map(id => runConfig(id, 600, 600)),
 ]);
+
+}

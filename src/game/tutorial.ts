@@ -130,7 +130,7 @@ export function lessonCopy(t: TutorialSession): { title: string; instruction: st
     if (first && t.element === 'lithium') action += ' Then press End turn / Skip turn three times. Each full turn-end counts once; avoid damage.';
     if (!first && ['hydrogen', 'lithium', 'boron'].includes(t.element)) action += ' Aim → and confirm the shot or dash.';
     if (!first && t.element === 'boron') action += ' End turn, then press Shatter to break the glass.';
-    if (!first && t.element === 'carbon') action += ' End turn, then choose Throw, aim → and confirm. Throwing spends your ability slot but no photons.';
+    if (!first && t.element === 'carbon') action += ' Choose Throw now, aim → and confirm. Throwing spends your ability slot but no photons.';
     if (!first && t.element === 'lithium') action += ' The target is beyond the void: the beam crosses it.';
     return {
       title: `${first ? 'First' : 'Second'} ability: ${first ? d.ability1Name : d.ability2Name}`,

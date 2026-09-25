@@ -1,3 +1,5 @@
+import { Portal } from './Portal';
+import { DamageFloat } from './DamageFloat';
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useGameStore } from '@/store/gameStore';
@@ -15,6 +17,7 @@ interface Props {
   tile: TileView;
   size: number;
   tick: number;
+  hideAtom?: boolean;
   /** Long press on an atom opens its card. Undefined leaves the tile inert. */
   onInspect?: (target: InspectTarget) => void;
 }
@@ -31,7 +34,7 @@ function resolveTint(tints: TileTint[], checker: 'light' | 'dark') {
   return { bg, border, dashed };
 }
 
-export function Tile({ tile, size, tick, onInspect }: Props) {
+export function Tile({ tile, size, tick, onInspect, hideAtom = false }: Props) {
   const reduced = useGameStore(s => s.reducedMotion);
   const glow = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -63,7 +66,7 @@ export function Tile({ tile, size, tick, onInspect }: Props) {
     const over = (
       <>
         {tile.threatIcon === '🎯' && <View pointerEvents="none" style={styles.target} />}
-        {tile.fx.map((f, i) => <FxBurst key={`${tick}-${i}`} type={f.type} size={size} x={tile.x} y={tile.y} angle={f.angle} />)}
+        {tile.fx.map((f, i) => f.feedback ? hideAtom ? null : <DamageFloat key={`${tick}-${i}`} fx={f} size={size} /> : <FxBurst key={`${tick}-${i}`} type={f.type} size={size} x={tile.x} y={tile.y} angle={f.angle} />)}
       </>
     );
     if (tile.isVoid) return <VoidCell size={size} x={tile.x} y={tile.y}>{over}</VoidCell>;
@@ -91,6 +94,7 @@ export function Tile({ tile, size, tick, onInspect }: Props) {
         onLongPress: () => onInspect(target),
         delayLongPress: 280,
         accessibilityRole: 'button' as const,
+        accessibilityLabel: `${tile.atom?.symbol ?? 'Atom'} · hold to inspect`,
         accessibilityHint: 'Hold for this atom\u2019s card',
       }
     : {};
@@ -122,9 +126,9 @@ export function Tile({ tile, size, tick, onInspect }: Props) {
         {threatIcon && <Text style={[styles.corner, styles.tr, { fontSize: cornerSize }]}>{threatIcon}</Text>}
 
         {tile.atom ? (
-          <Atom atom={tile.atom} size={atomSize} />
+          hideAtom ? null : <Atom atom={tile.atom} size={atomSize} />
         ) : tile.centerIcon ? (
-          <View style={[styles.center, tile.centerDim && { opacity: 0.55 }]}>
+          tile.centerLabel === 'HUT' || tile.centerLabel === 'HATCH' ? <Portal kind={tile.centerLabel === 'HUT' ? 'hut' : 'hatch'} size={size} /> : <View style={[styles.center, tile.centerDim && { opacity: 0.55 }]}>
             <Text style={{ fontSize: size * 0.4 }}>{tile.centerIcon}</Text>
             {tile.centerLabel && (
               <Text style={[styles.centerLabel, { fontSize: Math.max(8, size * 0.15) }, isScorched && styles.centerLabelOnDark]}>
@@ -134,8 +138,9 @@ export function Tile({ tile, size, tick, onInspect }: Props) {
           </View>
         ) : null}
 
-        {tile.fx.map((f, i) => <FxBurst key={`${tick}-${i}`} type={f.type} size={size} x={tile.x} y={tile.y} angle={f.angle} />)}
+        {tile.fx.map((f, i) => f.feedback ? hideAtom ? null : <DamageFloat key={`${tick}-${i}`} fx={f} size={size} /> : <FxBurst key={`${tick}-${i}`} type={f.type} size={size} x={tile.x} y={tile.y} angle={f.angle} />)}
       </View>
+      {tile.inspect?.kind === 'player' && <View pointerEvents="none" style={{position:'absolute',inset:0,borderWidth:2,borderColor:theme.playerElectron,borderRadius:3}}><Text style={{position:'absolute',top:1,left:3,fontSize:Math.max(8,size*.13),fontWeight:'700',color:theme.playerElectron}}>YOU</Text></View>}
       {tile.tints.includes('aim') && <View pointerEvents="none" style={styles.target} />}
     </Cell>
   );

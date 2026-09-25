@@ -33,6 +33,7 @@ function Para({ label, children }: { label: string; children: React.ReactNode })
 function enemyStatus(e: Enemy): string[] {
   const out: string[] = [];
   if (e.encasedTurnsLeft > 0) out.push(`🪟 Encased — bursts in ${e.encasedTurnsLeft}`);
+  if (e.type === 'fluorine' && e.armed && (e.paralyzed || e.tetherTurnsLeft > 0 || e.encasedTurnsLeft > 0)) out.push('Fuse paused — resumes when disabling effects wear off');
   if (e.frozenTurnsLeft > 0) out.push(`❄️ Frozen for ${e.frozenTurnsLeft} — ram it to shatter it for free`);
   if (e.tetherTurnsLeft > 0) out.push(`🪢 Tethered for ${e.tetherTurnsLeft} — it cannot act`);
   if (e.paralyzed) out.push('⚡ Paralyzed for this round — ramming costs you no health; normal damage applies');

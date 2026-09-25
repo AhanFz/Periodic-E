@@ -38,7 +38,7 @@ export function runTutorialScenarios() {
         case 'second':
           cast(3);
           if (element === 'boron') { g.passTurn(); g.shatter(); }
-          if (element === 'carbon') { g.passTurn(); g.beginThrow(); g.previewAim('right'); g.confirmAim(); }
+          if (element === 'carbon') { g.beginThrow(); g.previewAim('right'); g.confirmAim(); }
           break;
         case 'ligand':
           g.movePlayer(1, 0);

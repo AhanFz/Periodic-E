@@ -18,6 +18,15 @@
         "backgroundColor": "#f6f1e4"
       }
     },
-    "web": {}
+    "web": {},
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ]
+    ]
   }
 }

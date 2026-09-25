@@ -54,11 +54,18 @@ export function runPresentationScenarios() {
   }
   const g = tutorialGame({ element: 'hydrogen', ligand: null, lesson: 'ram', complete: false });
   const copy = g.fork(); const labels: string[] = [];
-  g.onFrame = label => labels.push(label);
+  g.onFrame = (label, motion) => { labels.push(label); if (motion) check(motion.actor === 'player' && motion.dx === 1 && motion.dy === 0, 'Ram motion direction'); };
   applyAction(g, { kind: 'move', dx: 1, dy: 0 });
   applyAction(copy, { kind: 'move', dx: 1, dy: 0 });
   g.onFrame = undefined;
   check(JSON.stringify(g) === JSON.stringify(copy), 'Presentation changed rules');
-  check(labels[0] === 'Ram impact' && labels[1].startsWith('Damage') && labels.some(label => label.includes('destroyed')), 'Ram order');
+  check(labels[0] === 'Ram · lunge and rebound' && labels[1] === 'Ram impact' && labels[2].startsWith('Damage') && labels.some(label => label.includes('destroyed')), 'Ram order');
+  const contact = tutorialGame({ element: 'hydrogen', ligand: null, lesson: 'ram', complete: false });
+  const enemy = contact.enemies[0];
+  enemy.type = 'bromine'; enemy.plannedDx = -1; enemy.plannedDy = 0;
+  const beats: string[] = [];
+  contact.onFrame = (label, motion) => { if (motion) { check(motion.actor === `enemy-${enemy.id}` && motion.target === 'player' && motion.dx === -1, 'Enemy contact direction'); beats.push('lunge'); } else if (label.startsWith('Damage')) beats.push('damage'); };
+  contact.passTurn();
+  check(beats[0] === 'lunge' && beats[1] === 'damage', 'Contact precedes damage');
   console.log(`presentation: ${count} non-mutating previews, freeze interruption, Exothermic ordering, population caps and frame parity passed`);
 }

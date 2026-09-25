@@ -8,6 +8,8 @@ see [What to test](#what-to-test) and [Reporting a bug](#reporting-a-bug) below.
 
 ---
 
+> Updated handoff: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md), consolidated September 25, 2026. It includes all current features, architecture, known issues and the unconfirmed iPhone positioning follow-up. Ability shortfall labels have been removed at the user's request.
+
 ## Play-testing it on your phone
 
 You need three things: **Node.js**, the **Expo Go** app on your phone, and this repository.
@@ -44,19 +46,19 @@ No simulator, Xcode or Android Studio is needed — Expo Go runs the game direct
 
 ## How to play
 
-**Goal.** Reach the escape hatch (🚪) on each grid. Along the way, visit the isotope hut (⚗️) to evolve
+**Goal.** Reach the blue escape hatch portal on each grid. Along the way, visit the green isotope hut portal to evolve
 into the next element. Escaping the hatch as **Neon** wins the run. Running out of health ends it.
 
 **Each turn you get one move and one ability, in either order.** The turn ends when both are spent, or
-when you press *End turn*. The two checkboxes above the buttons show what you have left. You can also
+when you press *End turn*. The Move/Ability ready-or-used labels show what you have left. You can also
 spend nothing at all: the same button reads *Skip turn* until you act, and waiting is often the right
 move against a Fluorine that has armed.
 
 **The tile you arrive on is ringed in blue** for the first turn of every grid, including a grid you have
-just dropped into through the hatch. After that turn the board goes back to normal.
+just dropped into through the hatch. The spawn glow disappears when you leave or end the first turn; a YOU marker identifies your current tile.
 
 **Ramming.** Walk into an enemy to attack it: it takes 2 damage, you take 1, and you stay where you were.
-Every element can do this. Frozen enemies shatter for free. Ramming a Fluorine defuses it. Ramming Bromine
+Every element can do this. Paralyzed enemies take normal ram damage without costing player health or shield. Frozen enemies shatter for free. Ramming a Fluorine defuses it. Ramming Bromine
 locks your abilities for the next turn.
 
 **Photons (🔆)** are the currency. You start with 2, get 1 per kill (2 for a molecule), and can pick up loose
@@ -69,12 +71,12 @@ the table is also a bigger health bar, from Hydrogen's 4 to Neon's 10. Evolving 
 **Hold any atom on the board** — yours or a halogen's — for a card with its readings, what it does, the tell
 that says what it is about to do, and how to beat it. It costs no turn.
 
-**Pause (⏸, top right)** shows where the run stands and offers Resume, Restart, or Quit to contents.
+**Pause (⏸, top right)** shows where the run stands and offers Resume, sound/haptic toggles, Restart, and Save & main menu.
 
 **The phone buzzes** with what happens: a thump when you ram, a heavier one when you take damage, a rising
 three-beat when you evolve. Devices without a haptic engine simply stay quiet.
 
-**The isotope hut** sells: *Evolve* (price drops by 1 for every kill on the current grid), *Heal*, and two
+**The isotope hut** sells: *Evolve* (non-noble price drops with stage kills; reset on grid entry/evolution; nobles have flat prices), *Heal*, and two
 permanent catalysts (+2 max health, or +1 damage to abilities and rams).
 
 **Noble gases** (Helium, Neon) are on a timer: reach the hatch within `grid size + 3` turns or start losing
@@ -97,11 +99,11 @@ in your head from a catalyst:
 |---|---|---|
 | **Passivation Layer** | 40 | The first time on each grid that damage drops you to 2 health or less, gain 2 shield. It reads the moment you *cross* into that state, so sitting at 2 does not keep re-arming it. |
 | **Supercooled Core** | 60 | Once per run, a killing blow leaves you at 1 health instead and freezes every neighbour for 2 turns. It will not save you from destabilising. |
-| **Fractional Distillation** | 50 | Everything is 1 photon cheaper during your first visit to each grid's hut, evolution included. Later visits to the same hut are full price. |
+| **Fractional Distillation** | 50 | One eligible purchase during the first hut visit each grid is 1 photon cheaper, including evolution. Minimum price 1; at most 1 photon saved per grid. |
 | **Exothermic Edge** | 45 | While your health is down to a third of its maximum or less, your rams deal 3 damage instead of 2. You still take 1. |
 
 **Quanta** are the cross-run currency, written with a ⬢ so it never reads as a photon. They are
-earned by finishing a run: 10 for escaping as Neon. Losing pays nothing for now. Photons stay inside
+earned by finishing a run: 50 for escaping as Neon. Losing pays nothing for now. Photons stay inside
 a run; quanta are the only thing that crosses between them.
 
 ### The elements
@@ -110,10 +112,10 @@ Health is `4 + ⌊mass ÷ 3⌋`, so it is the atomic weight that decides how muc
 
 | | Mass | HP | Tier 1 | Tier 3 |
 |---|---|---|---|---|
-| **H** Hydrogen | 1.008 | 4 | **Hydrogen Bond** (1 🔆) — tether an adjacent enemy for 2 turns; it trails behind you and cannot act | **Double Dash** (3 🔆) — dash 2 tiles, 3 damage to everything you pass through, none to you |
+| **H** Hydrogen | 1.008 | 4 | **Hydrogen Bond** (1 🔆) — tether an adjacent enemy for 3 turns; it trails behind you and cannot act | **Double Dash** (3 🔆) — dash 2 tiles, 3 damage to everything you pass through, none to you |
 | **He** Helium | 4.003 | 5 | **Freeze** (1 🔆) the 4 tiles around you for 2 turns | **Deep Freeze** (3 🔆) all 8 neighbours for 3 rounds |
 | **Li** Lithium | 6.94 | 6 | **Battery** (1 🔆) — charge for 3 turns, counting the one you start it in; take no damage and it discharges for 4 photons, take a hit and it shorts out | **Ion Beam** (3 🔆) — 2 damage and paralysis to everything in one direction, straight across voids to the far edge |
-| **Be** Beryllium | 9.012 | 7 | **Shield** (1 🔆) +2; ramming is free while it holds | **Inert Shield** (3 🔆) +3, free ramming, poison immunity |
+| **Be** Beryllium | 9.012 | 7 | **Shield** (1 🔆) raise shield to at least 2; ramming is free while it holds | **Inert Shield** (3 🔆) raise shield to at least 3, free ramming, poison immunity |
 | **B** Boron | 10.81 | 7 | **Dopant Trap** (1 🔆) under your feet; burns the next enemy to step on it for 1, then paralyzes and suppresses it | **Encase** (3 🔆) an adjacent enemy in glass; **Shatter** it for free later |
 | **C** Carbon | 12.011 | 8 | **Graphene Sheet** (1 🔆) — bridge over void or off an edge; collapses in 3 turns | **Diamond Spear** (3 🔆) — 3 damage per hit, range 4; throw it for free, pick it up, throw again |
 | **N** Nitrogen | 14.007 | 8 | **Blast** (1 🔆) 2 tiles in a line, scorching them | **Blast 4** (3 🔆) — all 4 neighbours |
@@ -176,8 +178,7 @@ General feedback ("Lithium feels useless", "the timer is too tight") is just as 
 
 ## For developers
 
-Built on **Expo SDK 57** (React Native 0.86, React 19.2.3, TypeScript 6). The only native module is
-`expo-haptics`, which Expo Go already carries — no dev build needed.
+Built on **Expo SDK 57** (React Native 0.86, React 19.2.3, TypeScript 6), with SDK-matched audio/haptics, SVG, AsyncStorage and safe-area packages. Use compatible Expo Go and verify device behaviour separately from browser/build checks.
 
 ```
 src/game/      pure game logic, no React imports — headlessly testable
@@ -259,7 +260,7 @@ Notes:
   `migrate()` rebuilds it field by field: anything missing, mistyped or unrecognised falls back to its
   default instead of throwing, and an unknown ligand id is dropped rather than treated as an error, so
   removing a ligand in a later version cannot brick an existing save. `loadProfile()` never rejects, so
-  corrupt storage yields a fresh profile and the app carries on. Writes are debounced and coalesced.
+  corrupt storage yields a fresh profile and the app carries on. Writes are ordered action checkpoints; profile and active run now share the session envelope described below.
 - **Ligand triggers** live on the engine as explicit state: `passivationUsedThisGrid` and
   `hutVisitsThisGrid` reset in `enterGrid`, `supercooledUsedThisRun` only on construction. Every point
   of player damage goes through `damagePlayer(amount, source)`, one choke point, which is where both
@@ -329,3 +330,50 @@ The main menu's **Chemistry Catalogue** contains all nine playable elements and 
 Halogen entries include a shared-electron-pair illustration for F₂, Cl₂, Br₂ and I₂, distinguishing covalent bonding from nuclear fusion. Other clarifications include hydrogen bonding versus H₂, cryogenic helium versus room-temperature gas, nitrogen compounds versus N₂, game poison colours versus real colours, and fictional health/evolution/noble-gas timers.
 
 Educational copy lives in `src/content/chemistry.ts`, with per-element Royal Society of Chemistry references, an OpenStax bonding reference, and a Toshiba semiconductor reference for boron doping. Text is bundled for offline reading; optional source links open the browser. `CatalogueScreen` owns selection locally and supports Android back navigation. No persistence or engine rules are changed by browsing.
+
+
+## Continue, autosave and run recaps
+
+Normal runs save after each resolved action, before combat playback. Closing/reopening the app offers **Continue** on the main menu. Pause → **Save & main menu** returns without abandoning the run. Starting a new run asks before replacing the single saved run. Tutorials, catalogue browsing and menu equipment changes do not replace an unfinished run; its original ligand remains equipped when resumed.
+
+The saved state includes the board, enemy plans and bonds, turn/action flags, aiming, hut visit, battery charge, trails, shields, temporary statuses, ligand usage and recap history. Animations, haptic queues and confirmation sheets are not resumed. `src/game/runSave.ts` is a pure versioned serializer/validator; restoration calls neither the constructor nor random grid generation. Invalid/unknown snapshots are ignored. Snapshot schema changes require an explicit migration or version increment.
+
+Only `src/persistence/profile.ts` touches AsyncStorage. The `element-evolution/session/v1` envelope contains `{ version: 1, profile, active }`; the profile retains its own schemaVersion 1. If the session key is absent, the old `element-evolution/profile/v1` profile is migrated without losing quanta or owned ligands. Writes are serialized per action/menu mutation, never per animation frame. Completion writes the updated profile and `active: null` together, preventing a previously completed run from being continued and rewarded twice. Backgrounding flushes pending writes. Storage failures show an on-screen warning; saving is local to the device.
+
+The win reward is **50 quanta** for escaping as Neon; losses and tutorials award none. Hydrogen tether now lasts **3 enemy phases**. Ramming a paralyzed enemy consumes no health or shield and deals the normal 2 damage plus applicable Exothermic/catalyst bonuses; frozen enemies still shatter outright.
+
+Game-over recap shows the evolution path, last 12 incoming damage events in order (source, grid, turn, shield absorption, HP before/after, Supercooled saves), total ligand activations, and the latest 200 purchase/evolution/ligand events. A notice identifies truncated earlier events. The history persists with unfinished runs; the game-over recap itself is not a permanent run archive. Preview calculations do not add history entries.
+
+Verification: `node tools/test-run-save.cjs` covers all 45 element/ligand snapshot combinations, restoration without RNG, fields/statuses/aiming, tether duration, paralyzed versus frozen rams, recap events, legacy profile migration, app restarts, tutorial isolation, win/loss cleanup, single 50-quanta awards, storage failure and corrupt data. Existing simulator and playback/tutorial store checks also pass.
+
+### Hut access and action updates
+
+While standing on the hut, use **Open hut** to reopen the shop without moving or spending a turn. This remains the same hut visit, including Fractional Distillation's discount. Evolution keeps the photons left after payment, with a minimum of two. The board header shows the current evolution price (including kill reductions and any hut discount); noble-gas countdowns remain visible. Carbon can forge and throw in one turn: forging costs three photons, while throwing costs no additional photons and spends the ability action.
+
+### Board movement and contact animation
+
+Atoms render in a stable layer above the cells and ease between positions over 240 ms. Rams have a forward lunge and rebound; visible halogen contact attacks lunge before the damage frame, with a small recoil on the target. Contact beats allow 420 ms and ordinary playback beats 300 ms. These are visual cues only: the engine resolves once, snapshots play back afterward, and autosave retains the resolved outcome. Reduced motion skips the transitions; Finish animation, pause, and background handling still settle immediately. Invisible enemies do not expose an attacker animation.
+
+### Immersion and navigation update
+
+Halogens now search for a shortest walkable route instead of only trying steps toward the player. They can move away briefly to get around voids. Search includes the full, fixed-orientation footprint of bonded pairs and blocks occupied, frozen, encased and scorched cells (the player's cell remains a legal contact target). If there is no valid route, they wait and replan. The existing arrow remains the next intended step; a newly obstructed step is skipped and replanned, never replaced by an unannounced attack. Chlorine still pauses to prepare poison, Fluorine arms near the player, and fleeing enemies prefer safe steps away. Bonded pairs do not rotate, so a pair wider than a corridor can still be legitimately blocked.
+
+Photon particles fly to the counter on gains. Evolution expands the atom and settles the new electron ring. Damage numbers report actual HP lost and shield absorbed. Fluorine detonations and Chlorine poison releases get a short wind-up. Hut and hatch now use distinct green reagent-gate and blue orbital-portal art. Electron rings obey reduced motion, and the pause menu scrolls on short screens. Battery feedback reports the actual gain at the five-photon cap.
+
+Original synthesized WAV cues are bundled under assets/audio for movement, impact, freeze, evolution and photon collection. Expo SDK-matched expo-audio handles playback (https://docs.expo.dev/versions/latest/sdk/audio/). Pause → Sound toggles sound for this app session; sounds stop when paused/backgrounded and respect iOS silent mode. Sound/haptic preferences are currently session-only. No recording permissions are requested. Check sound levels and silent-mode behaviour on a physical phone.
+
+Regression coverage: tools/test-navigation.cjs reproduces the screenshot's 6×6 split board, including vertical molecules, frozen blockers, a disconnected chamber, a too-wide molecule, and a scorched player. It also checks shield/HP feedback, capped photon feedback and attack wind-up. Run it after npm run sim.
+
+Known follow-ups, not changed in this pass: the Fluorine fuse now pauses under paralysis/tether and is cancelled by freeze (September 25 fix). Fixed-orientation molecules cannot turn into narrow corridors; allowing rotation would be a new movement rule. Persist sound/haptic settings across launches.
+
+### Spawn alignment and guidance
+
+Moving atoms now use their actual cell as the layout anchor, with a temporary animation offset returning to zero. Mounts, board resizes and interrupted moves reset the offset. The current player tile has a YOU marker; the spawn glow disappears when the player leaves it. Controls describe remaining actions, ability buttons show only their name and photon cost, and the header offers a contextual evolution objective. Noble elements do not suggest reducing evolution price with kills.
+
+The iOS alignment follow-up isolates atom positioning on a non-flattened, non-animated cell anchor. Travel uses a JS-driven inner offset; contact and evolution effects remain separate. This avoids relying on native transform resets for cell positioning. Physical iPhone verification remains necessary.
+
+## September 25 balance changes
+
+Fractional now discounts one eligible purchase during the first hut visit per grid, never below 1 photon. The first actual saving consumes the discount. Catalyst purchases are capped at three of each type per run. Beryllium raises shields to at least 2/3, preserving stronger shields and existing poison immunity. Paralysis/tether pause an armed Fluorine fuse; freeze cancels it. These rules override earlier descriptions of unrestricted first-visit discounts. Existing active saves migrate to snapshot v2 and retain their stats; legacy visited huts conservatively count the discount as spent.
+
+[Balance review](BALANCE_REVIEW_2026-09-25.md) contains the reproducible 24,000-game comparison and remaining limitations. The proposed low-cost hut gamble/hidden post-Neon level is an idea only.

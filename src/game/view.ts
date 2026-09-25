@@ -180,7 +180,7 @@ export function buildBoardView(game: Game): BoardView {
         pulse: isWarning || isAim || isDanger || !!enemy?.paralyzed || (!!enemy && enemy.bondingWith !== null),
         atom, centerIcon, centerLabel, centerDim, threatIcon, moveArrow, tetherArrow,
         inspect: isPlayer ? { kind: 'player' } : enemy ? { kind: 'enemy', id: enemy.id } : null,
-        startGlow: isStart && game.showStartMarker, isGhost,
+        startGlow: isStart && isPlayer && game.showStartMarker, isGhost,
         sheetTimer: sheet ? sheet.turnsLeft : null,
         fx: game.pendingEffects.filter(f => f.x === x && f.y === y),
       });

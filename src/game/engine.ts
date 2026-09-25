@@ -1,3 +1,5 @@
+import { CATALYST_LIMIT } from './constants';
+import type { CombatMotion } from './types';
 import { freshHistory, type Milestone } from './history';
 import {
   ENEMY_PRESSURE, BATTERY_PAYOUT, BATTERY_TURNS, CATALYST_PRICE, DASH_DAMAGE, DOPANT_TRAP_DAMAGE, ELEMENTS, ENCASE_TURNS, ENEMIES,
@@ -41,7 +43,7 @@ export class Game {
   }
 
   /** Optional presentation observer. Never participates in rules or persistence. */
-  onFrame?: (label: string) => void;
+  onFrame?: (label: string, motion?: CombatMotion) => void;
   projecting = false;
   projectedDamage: Array<{ id: number; amount: number }> = [];
   projectedTurnEnd = false;
@@ -96,6 +98,7 @@ export class Game {
   passivationFiresThisGrid = 0;
   /** Counted on arrival at the hut tile, not per purchase. Only the first visit is discounted. */
   hutVisitsThisGrid = 0;
+  fractionalUsedThisGrid = false;
   telegraphTiles: Pos[] = [];
   poisonZones: PoisonZone[] = [];
   scorchedTiles: Scorched[] = [];
@@ -169,8 +172,8 @@ export class Game {
   }
   /** Base ram damage before the damage catalyst. */
   get ramDamage() { return this.exothermicActive ? EXOTHERMIC_RAM_DAMAGE : RAM_DAMAGE; }
-  /** Fractional Distillation: 1 off everything, but only across a grid's first hut visit. */
-  get hutDiscount() { return this.hasLigand('fractional') && this.hutVisitsThisGrid <= 1 ? HUT_DISCOUNT : 0; }
+  /** Fractional Distillation: 1 off one purchase during a grid's first hut visit; prices stay at least 1. */
+  get hutDiscount() { return this.hasLigand('fractional') && !this.fractionalUsedThisGrid && this.hutVisitsThisGrid <= 1 ? HUT_DISCOUNT : 0; }
   /** Supercooled Core: still holding its one save. */
   get supercooledReady() { return this.hasLigand('supercooled') && !this.supercooledUsedThisRun; }
   /** Passivation Layer: still holding this grid's trigger. */
@@ -201,6 +204,7 @@ export class Game {
     this.passivationUsedThisGrid = false;
     this.passivationFiresThisGrid = 0;
     this.hutVisitsThisGrid = 0;
+    this.fractionalUsedThisGrid = false;
     this.telegraphTiles = [];
     this.poisonZones = [];
     this.scorchedTiles = [];
@@ -343,6 +347,7 @@ export class Game {
         healthAfter: this.elementHealth, absorbed: Math.min(shieldBefore, amount), saved: this.supercooledFires > savesBefore });
       if (this.history.damage.length > 12) this.history.damage.shift();
     }
+    this.pendingEffects.push({ type:'crush', ...this.playerPos, feedback:'damage', amount:Math.max(0,healthBefore-this.elementHealth), shield:Math.min(shieldBefore,amount) });
     this.onFrame?.(`Damage · ${source}${this.elementHealth < healthBefore ? ` −${healthBefore - this.elementHealth} HP` : " · absorbed"}`);
   }
 
@@ -407,7 +412,7 @@ export class Game {
     this.abilityLockedTurns = Math.max(this.abilityLockedTurns, this.enemyPhase ? 1 : 2);
   }
 
-  private gainPhotons(n: number) { this.photons = Math.min(PHOTON_CAP, this.photons + n); }
+  private gainPhotons(n: number) { const before=this.photons; this.photons = Math.min(PHOTON_CAP, this.photons + n); return this.photons-before; }
 
   /** Remove an enemy and pay out. Molecules pay double. */
   private killEnemy(e: Enemy, credited = true) {
@@ -417,10 +422,13 @@ export class Game {
     const mult = e.bonded ? 2 : 1;
     this.stageKills += mult;
     this.totalKills += mult;
+    const before=this.photons;
     this.gainPhotons(mult);
+    if (this.photons>before) this.pendingEffects.push({ type:'photon', x:e.invisibleTurnsLeft>0?this.playerPos.x:e.x, y:e.invisibleTurnsLeft>0?this.playerPos.y:e.y, amount:this.photons-before });
   }
   private damageEnemy(e: Enemy, amount: number): boolean {
     if (this.projecting) this.projectedDamage.push({ id: e.id, amount });
+    if (e.invisibleTurnsLeft <= 0) this.pendingEffects.push({ type:'crush', x:e.x,y:e.y,feedback:'damage',amount:Math.min(e.health,amount) });
     e.health -= amount;
     if (e.health <= 0) { this.killEnemy(e); this.onFrame?.(e.invisibleTurnsLeft > 0 ? "Impact" : `${ENEMIES[e.type].symbol} destroyed`); return true; }
     this.cue('hit');
@@ -451,7 +459,7 @@ export class Game {
       this.hutVisitsThisGrid++;
       const price = this.hutPrice('evolve');
       this.setMessage(
-        `⚗️ Isotope hut. Evolve costs ${price ?? '—'} photons.${this.hutDiscount > 0 ? ` ${LIGANDS.fractional.name} takes ${this.hutDiscount} off everything this visit.` : ''}`,
+        `⚗️ Isotope hut. Evolve costs ${price ?? '—'} photons.${this.hutDiscount > 0 ? ` ${LIGANDS.fractional.name} takes ${this.hutDiscount} off one purchase this visit (minimum 1).` : ''}`,
         'info',
       );
     }
@@ -497,10 +505,10 @@ export class Game {
     if (this.batteryTurnsLeft <= 0) return;
     this.batteryTurnsLeft--;
     if (this.batteryTurnsLeft > 0) return;
-    this.gainPhotons(BATTERY_PAYOUT);
-    this.addFx('photon', this.playerPos.x, this.playerPos.y);
+    const gained=this.gainPhotons(BATTERY_PAYOUT);
+    if(gained>0)this.addFx('photon', this.playerPos.x, this.playerPos.y);
     this.cue('photon');
-    this.note(`🔋 Battery discharged: +${BATTERY_PAYOUT} photons (${this.photons}/${PHOTON_CAP})`);
+    this.note(`🔋 Battery discharged: +${gained} photons (${this.photons}/${PHOTON_CAP})`);
   }
 
   private spawnPressure() {
@@ -551,6 +559,7 @@ export class Game {
   /** Walking into an enemy: fixed damage both ways, and the player stays where they were. */
   private ram(e: Enemy, at: Pos) {
     const sym = ENEMIES[e.type].symbol + (e.bonded ? '₂' : '');
+    this.onFrame?.('Ram · lunge and rebound', { actor: 'player', target: `enemy-${e.id}`, dx: at.x - this.playerPos.x, dy: at.y - this.playerPos.y });
     if (e.frozenTurnsLeft > 0) {
       for (const t of this.enemyTiles(e)) this.addFx('shatter', t.x, t.y);
       this.killEnemy(e);
@@ -582,7 +591,7 @@ export class Game {
   private onPlayerArrive() {
     const p = this.playerPos;
     const pi = this.photonTiles.findIndex(t => same(t, p));
-    if (pi !== -1) { this.photonTiles.splice(pi, 1); this.gainPhotons(1); this.addFx('photon', p.x, p.y); this.cue('photon'); this.setMessage(`🔆 Photon absorbed (${this.photons}/${PHOTON_CAP})`, 'success'); }
+    if (pi !== -1) { this.photonTiles.splice(pi, 1); const gained=this.gainPhotons(1); if(gained>0)this.addFx('photon', p.x, p.y); this.cue('photon'); this.setMessage(`🔆 Photon absorbed (${this.photons}/${PHOTON_CAP})`, 'success'); }
     if (this.groundedSpear && same(this.groundedSpear, p)) {
       this.heldSpear = this.groundedSpear.health;
       this.groundedSpear = null;
@@ -622,6 +631,7 @@ export class Game {
       if (!dests) { e.tetherTurnsLeft = 0; this.note(`🪢 The bond to ${ENEMIES[e.type].symbol} snapped`); continue; }
       e.x = dests[0].x; e.y = dests[0].y;
       if (e.bonded) { e.x2 = dests[1].x; e.y2 = dests[1].y; }
+      if (e.type === 'fluorine' && e.armed) e.explodeTiles = this.fluorineBlastTiles(e);
       for (const t of dests) this.addFx('tether', t.x, t.y);
     }
   }
@@ -758,7 +768,7 @@ export class Game {
     this.pendingEffects = [];
     this.spendPhotons(1);
     e.tetherTurnsLeft = TETHER_TURNS;
-    e.armed = false; e.explodeTiles = [];
+    // An armed Fluorine keeps its fuse, paused while tethered.
     e.telegraph = false; e.telegraphTiles = [];
     e.bondingWith = null;
     e.plannedDx = 0; e.plannedDy = 0;
@@ -827,10 +837,10 @@ export class Game {
   // ---- Beryllium ----
   private berylliumShield(tier: 1 | 3) {
     this.spendPhotons(tier);
-    this.shieldPoints = tier === 1 ? 2 : 3;
-    this.poisonImmune = tier === 3;
+    this.shieldPoints = Math.max(this.shieldPoints, tier === 1 ? 2 : 3);
+    this.poisonImmune = this.poisonImmune || tier === 3;
     this.addFx('shield', this.playerPos.x, this.playerPos.y);
-    this.setMessage(tier === 1 ? '🛡️ Shield +2. Ramming is free while it holds.' : '🛡️ Inert shield +3. Free ramming, and poison cannot touch you.', 'success');
+    this.setMessage(tier === 1 ? '🛡️ Shield raised to at least 2. Ramming is free while it holds.' : '🛡️ Shield raised to at least 3. Free ramming, and poison cannot touch you.', 'success');
     this.spendAbilitySlot();
   }
 
@@ -924,8 +934,9 @@ export class Game {
     this.spendPhotons(3);
     this.heldSpear = SPEAR_HEALTH;
     this.addFx('spear', this.playerPos.x, this.playerPos.y);
-    this.setMessage('💠 Diamond spear forged. Throwing is free.', 'success');
-    this.spendAbilitySlot();
+    this.setMessage('💠 Diamond spear forged. Throw it this turn: no more photons; throwing uses your ability action.', 'success');
+    // Forging is preparation; the throw spends the ability slot.
+    // In particular, moving before forging must not trigger an enemy response.
   }
   /**
    * Physical piercing: 3 damage per enemy, 2 durability per hit regardless of the enemy's health,
@@ -1052,7 +1063,7 @@ export class Game {
   hutPrice(item: HutItem): number | null {
     const base = this.basePrice(item);
     if (base === null) return null;
-    return Math.max(0, base - this.hutDiscount);
+    return Math.max(1, base - this.hutDiscount);
   }
   /** The list price, before any ligand. The UI strikes this through when it differs. */
   basePrice(item: HutItem): number | null {
@@ -1063,6 +1074,8 @@ export class Game {
   canBuy(item: HutItem) {
     const price = this.hutPrice(item);
     if (price === null || this.photons < price) return false;
+    if (item === 'healthCatalyst' && this.maxHealthBonus >= CATALYST_LIMIT * 2) return false;
+    if (item === 'damageCatalyst' && this.damageBonus >= CATALYST_LIMIT) return false;
     if (item === 'heal' && this.elementHealth >= this.maxHealth) return false;
     return true;
   }
@@ -1071,7 +1084,10 @@ export class Game {
     const price = this.hutPrice(item)!;
     const names: Record<HutItem, string> = { evolve: 'Evolution', heal: 'Healing', healthCatalyst: 'Health catalyst', damageCatalyst: 'Damage catalyst' };
     this.remember('purchase', `${names[item]}: ${price} photon${price === 1 ? '' : 's'}.`);
-    if (this.hutDiscount > 0) this.recordLigand('fractional', `Fractional Distillation saved 1 photon on ${names[item].toLowerCase()}.`);
+    if (this.basePrice(item)! > price) {
+      this.fractionalUsedThisGrid = true;
+      this.recordLigand('fractional', `Fractional Distillation saved 1 photon on ${names[item].toLowerCase()}. Discount used for this grid.`);
+    }
     this.photons -= price;
     this.pendingEffects = [];
     if (item !== 'evolve') this.cue('buy');
@@ -1095,6 +1111,9 @@ export class Game {
         break;
     }
   }
+  get canOpenHut() { return !this.gameOver && !this.aiming && same(this.playerPos, this.layout.hut); }
+  /** Reopening the shop while stationary is still the same visit. */
+  openHut() { if (this.canOpenHut) this.atHut = true; }
   leaveHut() { this.atHut = false; }
 
   private evolve() {
@@ -1117,6 +1136,7 @@ export class Game {
     this.addFx('evolve', this.playerPos.x, this.playerPos.y);
     this.setMessage(
       `🌟 Evolved into ${ELEMENTS[next].symbol}! Full health${gained > 0 ? `, +${gained} max from the heavier nucleus` : ''} (${this.maxHealth}).`
+      + ` ${this.photons} photons available.`
       + `${this.isNoble ? ` Turn limit: ${this.turnLimit}.` : ''}`,
       'success',
     );
@@ -1159,6 +1179,7 @@ export class Game {
         if (ok) {
           e.x = dest[0].x; e.y = dest[0].y;
           if (e.bonded) { e.x2 = dest[1].x; e.y2 = dest[1].y; }
+          if (e.type === 'fluorine' && e.armed) e.explodeTiles = this.fluorineBlastTiles(e);
           for (const t of dest) this.addFx('gust', t.x, t.y);
         } else {
           for (const t of this.enemyTiles(e)) this.addFx('crush', t.x, t.y);
@@ -1204,17 +1225,31 @@ export class Game {
   }
 
   private decideMoveDelta(e: Enemy): [number, number] {
-    let dx = Math.sign(this.playerPos.x - e.x), dy = Math.sign(this.playerPos.y - e.y);
-    if (e.fleeTurnsLeft > 0) { dx = -dx; dy = -dy; }
     if (e.type === 'chlorine' && !e.telegraph && e.poisonCooldown <= 0) return [0, 0];
-    if (dx === 0 && dy === 0) return [0, 0];
-    const preferX = dx !== 0 && (dy === 0 || Math.random() > 0.3);
-    const first: [number, number] = preferX ? [dx, 0] : [0, dy];
-    const second: [number, number] = preferX ? [0, dy] : [dx, 0];
-    if (this.canStep(e, first)) return first;
-    if (second[0] !== 0 || second[1] !== 0) if (this.canStep(e, second)) return second;
-    return [0, 0];
+    const offsets = this.enemyTiles(e).map(t => ({ x: t.x-e.x, y: t.y-e.y }));
+    // Search translations of the entire footprint: bonded pairs cannot squeeze across voids.
+    const valid = (x: number, y: number) => offsets.every(o => same({x:x+o.x,y:y+o.y},this.playerPos) ? !this.enemyAt(x+o.x,y+o.y) : this.enemyCanEnter(x+o.x, y+o.y, e));
+    const distance = (x: number, y: number) => Math.min(...offsets.map(o => Math.abs(x+o.x-this.playerPos.x)+Math.abs(y+o.y-this.playerPos.y)));
+    const directions = [...CARDINAL].sort((a,b) => distance(e.x+a[0],e.y+a[1])-distance(e.x+b[0],e.y+b[1]));
+    if (e.fleeTurnsLeft > 0) {
+      const away = directions.filter(d => this.canStep(e,d) && distance(e.x+d[0],e.y+d[1]) > distance(e.x,e.y)).pop();
+      return away ?? [0,0];
+    }
+    const queue: Array<{x:number; y:number; first:[number,number]}> = [{ x:e.x,y:e.y,first:[0,0] }];
+    const seen = new Set([`${e.x},${e.y}`]);
+    for (let i=0;i<queue.length;i++) {
+      const node=queue[i];
+      for (const d of directions) {
+        const x=node.x+d[0], y=node.y+d[1], key=`${x},${y}`;
+        if (seen.has(key) || !valid(x,y)) continue;
+        const first: [number,number] = i===0 ? [d[0],d[1]] : node.first;
+        if (distance(x,y)===0) return first;
+        seen.add(key); queue.push({x,y,first});
+      }
+    }
+    return [0,0];
   }
+
   private canStep(e: Enemy, [dx, dy]: [number, number]) {
     return this.enemyTiles(e).every(t => {
       const nx = t.x + dx, ny = t.y + dy;
@@ -1249,6 +1284,10 @@ export class Game {
   private contactAttack(e: Enemy) {
     const sym = ENEMIES[e.type].symbol + (e.bonded ? '₂' : '');
     const p = this.playerPos;
+    if (e.invisibleTurnsLeft <= 0) {
+      const from = this.enemyTiles(e).reduce((a, b) => Math.abs(a.x-p.x)+Math.abs(a.y-p.y) <= Math.abs(b.x-p.x)+Math.abs(b.y-p.y) ? a : b);
+      this.onFrame?.(`${sym} · contact`, { actor: `enemy-${e.id}`, target: 'player', dx: p.x-from.x, dy: p.y-from.y });
+    }
     if (e.type === 'bromine') {
       this.addFx('corrode', p.x, p.y);
       this.damagePlayer(1, 'contact');
@@ -1292,7 +1331,8 @@ export class Game {
 
     // detonations
     for (const e of this.enemies.filter(x => x.type === 'fluorine' && x.armed && x.frozenTurnsLeft <= 0)) {
-      if (!e.armed || e.frozenTurnsLeft > 0) continue; // An earlier blast may have triggered Supercooled Core.
+      if (!e.armed || e.frozenTurnsLeft > 0 || e.paralyzed || e.tetherTurnsLeft > 0 || e.encasedTurnsLeft > 0) continue; // An earlier blast may have triggered Supercooled Core.
+      if (e.invisibleTurnsLeft <= 0) this.onFrame?.('Fluorine · detonation wind-up', {actor:`enemy-${e.id}`,target:'',dx:0,dy:0,kind:'windup'});
       for (const t of e.explodeTiles) this.addFx('explosion', t.x, t.y);
       if (e.explodeTiles.some(t => same(t, this.playerPos))) {
         this.damagePlayer(2, 'explosion');
@@ -1351,6 +1391,7 @@ export class Game {
 
   private actChlorine(e: Enemy) {
     if (e.telegraph) {
+      this.onFrame?.('Chlorine · poison wind-up', {actor:`enemy-${e.id}`,target:'',dx:0,dy:0,kind:'windup'});
       for (const t of e.telegraphTiles) { this.poisonZones.push({ x: t.x, y: t.y, sourceId: e.id }); this.addFx('smoke', t.x, t.y); }
       e.telegraph = false; e.telegraphTiles = [];
       e.poisonCooldown = 3;
@@ -1382,6 +1423,15 @@ export class Game {
     this.telegraphTiles = this.enemies.filter(e => e.telegraph).flatMap(e => e.telegraphTiles);
   }
 
+  private fluorineBlastTiles(e: Enemy): Pos[] {
+    const tiles: Pos[] = [];
+    for (const t of this.enemyTiles(e)) {
+      const deltas: Array<[number, number]> = e.bonded ? [[0, 0], ...ALL_EIGHT] : [[0, 0], ...CARDINAL];
+      for (const [dx, dy] of deltas) if (this.isPassable(t.x + dx, t.y + dy) && !tiles.some(p => p.x === t.x + dx && p.y === t.y + dy)) tiles.push({x:t.x+dx,y:t.y+dy});
+    }
+    return tiles;
+  }
+
   private actFluorine(e: Enemy) {
     const near = () => this.enemyTiles(e).some(t => e.bonded
       ? Math.max(Math.abs(t.x - this.playerPos.x), Math.abs(t.y - this.playerPos.y)) <= 2
@@ -1389,12 +1439,7 @@ export class Game {
     if (!near()) this.resolveMove(e);
     if (near()) {
       e.armed = true;
-      const tiles: Pos[] = [];
-      for (const t of this.enemyTiles(e)) {
-        const deltas: Array<[number, number]> = e.bonded ? [[0, 0], ...ALL_EIGHT] : [[0, 0], ...CARDINAL];
-        for (const [dx, dy] of deltas) if (this.isPassable(t.x + dx, t.y + dy) && !tiles.some(p => p.x === t.x + dx && p.y === t.y + dy)) tiles.push({ x: t.x + dx, y: t.y + dy });
-      }
-      e.explodeTiles = tiles;
+      e.explodeTiles = this.fluorineBlastTiles(e);
       e.plannedDx = 0; e.plannedDy = 0;
     }
   }
@@ -1437,9 +1482,8 @@ export class Game {
         this.note(`⚡ ${ENEMIES[e.type].symbol} burned out on a dopant trap`);
         continue;
       }
-      // Paralyzed and stripped of its special for the turn: no arming, channelling or vanishing.
+      // Paralysis pauses an existing Fluorine fuse; freeze alone cancels it.
       e.paralyzed = true;
-      e.armed = false; e.explodeTiles = [];
       e.telegraph = false; e.telegraphTiles = [];
       if (e.invisibleTurnsLeft > 0) { e.invisibleTurnsLeft = 0; e.lastKnown = null; e.vaporCooldown = 3; }
       e.plannedDx = 0; e.plannedDy = 0;

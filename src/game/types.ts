@@ -92,6 +92,9 @@ export interface Trail { x: number; y: number; turnsLeft: number; }
 export interface GroundedSpear { x: number; y: number; health: number; }
 export interface PendingWave { x: number; y: number; roundsLeft: number; }
 export interface Fx {
+  feedback?: 'damage';
+  amount?: number;
+  shield?: number;
   type: FxType;
   x: number;
   y: number;
@@ -148,4 +151,13 @@ export interface GridLayout {
   hut: Pos;
   hatch: Pos;
   polarity: boolean;
+}
+
+/** Transient presentation cue, emitted before contact damage; never stored in a save. */
+export interface CombatMotion {
+  kind?: 'windup';
+  actor: string;
+  target: string;
+  dx: number;
+  dy: number;
 }

@@ -1,3 +1,4 @@
+import {useGameStore} from '@/store/gameStore';
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { theme } from '../theme';
@@ -14,9 +15,13 @@ interface Props {
  * rotates the whole ring. Player electrons are blue ink, halogen electrons red.
  */
 export function ElectronRing({ count, radius, isHalogen, dotSize = 4 }: Props) {
+  const reduced=useGameStore(s=>s.reducedMotion);
+  const settle=useRef(new Animated.Value(1)).current;
+  useEffect(()=>{settle.setValue(reduced?1:.45);const a=Animated.spring(settle,{toValue:1,damping:12,stiffness:100,useNativeDriver:true});if(!reduced)a.start();return()=>a.stop();},[count,reduced,settle]);
   const spin = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    if(reduced){spin.setValue(0);return;}
     const loop = Animated.loop(
       Animated.timing(spin, {
         toValue: 1,
@@ -27,7 +32,7 @@ export function ElectronRing({ count, radius, isHalogen, dotSize = 4 }: Props) {
     );
     loop.start();
     return () => loop.stop();
-  }, [spin, isHalogen]);
+  }, [spin, isHalogen,reduced]);
 
   const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
   const size = radius * 2;
@@ -54,7 +59,7 @@ export function ElectronRing({ count, radius, isHalogen, dotSize = 4 }: Props) {
   return (
     <Animated.View
       pointerEvents="none"
-      style={[styles.ring, { width: size, height: size, borderRadius: radius, transform: [{ rotate }] }]}
+      style={[styles.ring, { width: size, height: size, borderRadius: radius, transform: [{ rotate },{scale:settle}] }]}
     >
       {dots}
     </Animated.View>

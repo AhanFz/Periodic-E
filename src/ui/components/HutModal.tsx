@@ -2,7 +2,7 @@ import React from 'react';
 import { Modal, StyleSheet, Text, View } from 'react-native';
 import { PaperButton, Rule, SectionLabel } from './Print';
 import { fonts, theme } from '../theme';
-import { ELEMENTS, EVOLUTION_CHAIN, HEAL_AMOUNT, LIGANDS } from '@/game/constants';
+import { ELEMENTS, EVOLUTION_CHAIN, HEAL_AMOUNT, LIGANDS, CATALYST_LIMIT } from '@/game/constants';
 import { useGameStore } from '@/store/gameStore';
 import type { Game } from '@/game/engine';
 import type { HutItem } from '@/game/types';
@@ -37,7 +37,7 @@ export function HutModal({ game }: { game: Game }) {
           <Text style={styles.sub}>You hold {game.photons} photons · {game.stageKills} kills on this grid.</Text>
           {game.hutDiscount > 0 && (
             <Text style={styles.discount}>
-              ⬢ {LIGANDS.fractional.name}: everything is {game.hutDiscount} photon cheaper on this grid's first visit.
+              ⬢ {LIGANDS.fractional.name}: one purchase is {game.hutDiscount} photon cheaper on this grid's first visit (minimum price 1).
             </Text>
           )}
 
@@ -47,9 +47,9 @@ export function HutModal({ game }: { game: Game }) {
           <Row game={game} item="heal" onBuy={() => buy('heal')}
                title={`Heal +${HEAL_AMOUNT}`} desc={`Health ${game.elementHealth}/${game.maxHealth}.`} />
           <Row game={game} item="healthCatalyst" onBuy={() => buy('healthCatalyst')}
-               title="Health catalyst" desc={`+2 max health for the rest of the run (now ${game.maxHealth}).`} />
+               title="Health catalyst" desc={`+2 max health for the rest of the run. ${Math.max(0,CATALYST_LIMIT-Math.floor(game.maxHealthBonus/2))}/${CATALYST_LIMIT} purchases left this run.`} />
           <Row game={game} item="damageCatalyst" onBuy={() => buy('damageCatalyst')}
-               title="Damage catalyst" desc={`+1 ability and ram damage for the rest of the run (now +${game.damageBonus}).`} />
+               title="Damage catalyst" desc={`+1 ability and ram damage for the rest of the run. ${Math.max(0,CATALYST_LIMIT-game.damageBonus)}/${CATALYST_LIMIT} purchases left this run.`} />
 
           <PaperButton label="Leave hut" variant="outline" onPress={leaveHut} style={{ marginTop: 10 }} />
         </View>

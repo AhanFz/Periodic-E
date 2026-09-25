@@ -16,11 +16,11 @@ const DIRS: Array<{ dir: Direction; dx: number; dy: number; glyph: string }> = [
 ];
 
 function Slot({ label, spent }: { label: string; spent: boolean }) {
-  return <Text style={[styles.slot, spent && styles.slotSpent]}>{spent ? '☑' : '☐'} {label}</Text>;
+  return <Text style={[styles.slot, spent && styles.slotSpent]}>{label}: {spent ? 'used' : 'ready'}</Text>;
 }
 
 export function ControlPad({ game }: { game: Game }) {
-  const { move, ability, confirmAim, passTurn, shatter, previewAim, cancelAim, beginThrow, prepareAction, pendingAction, cancelAction } = useGameStore();
+  const { openHut, move, ability, confirmAim, passTurn, shatter, previewAim, cancelAim, beginThrow, prepareAction, pendingAction, cancelAction } = useGameStore();
   if (pendingAction) {
     const preview = actionPreview(game, pendingAction);
     return <View style={{ gap: 6 }}>
@@ -70,14 +70,16 @@ export function ControlPad({ game }: { game: Game }) {
       <View style={styles.slots}>
         <Slot label="Move" spent={moved} />
         <Slot label="Ability" spent={used} />
-        <Text style={styles.slotHint}>{anySpent ? (moved && used ? '' : 'one action left') : 'hold a control to preview'}</Text>
+        <Text style={styles.slotHint}>{anySpent ? '' : 'Your turn'}</Text>
       </View>
+      <Text style={[styles.preview,{width:'100%',fontSize:12}]}>{moved ? 'Move used. Use an ability or end your turn.' : used ? 'Ability used. Move or end your turn.' : 'Move + use one ability, in either order. End turn to wait.'}</Text>
       {DIRS.map(b => <PaperButton key={b.dir} label={b.glyph} big style={styles.quarter} disabled={moved} onLongPress={() => prepareAction({ kind: 'move', dx: b.dx, dy: b.dy })} onPress={() => move(b.dx, b.dy)} />)}
       <PaperButton label={locked ? '🔒 locked' : used ? '✓ used' : `${d.ability1Short} · ${d.ability1Cost} 🔆`} style={styles.half} disabled={!can1} onLongPress={() => prepareAction({ kind: 'ability', tier: 1 })} onPress={() => ability(1)} />
       <PaperButton label={locked ? '🔒 locked' : used ? '✓ used' : `${d.ability2Short} · ${d.ability2Cost} 🔆`} style={styles.half}
         variant={can3 ? 'highlight' : 'outline'} disabled={!can3} onLongPress={() => prepareAction({ kind: 'ability', tier: 3 })} onPress={() => ability(3)} />
       {game.encasedCount > 0 && <PaperButton label={`🪟 Shatter (${game.encasedCount})`} variant="primary" style={game.heldSpear === null ? styles.wide : styles.half} disabled={used} onLongPress={() => prepareAction({ kind: 'shatter' })} onPress={shatter} />}
       {game.heldSpear !== null && <PaperButton label={`💠 Throw (${game.heldSpear})`} variant="primary" style={game.encasedCount === 0 ? styles.wide : styles.half} disabled={used} onPress={beginThrow} />}
+      {game.canOpenHut && <PaperButton label="⚗️ Open hut" style={styles.wide} onPress={openHut} />}
       {/* Always live: a turn can be passed with nothing spent. Muted here read as disabled. */}
       <PaperButton label={anySpent ? 'End turn ▸' : 'Skip turn ▸'} variant={anySpent ? 'primary' : 'outline'} style={styles.wide} onLongPress={() => prepareAction({ kind: 'pass' })} onPress={passTurn} />
     </View>

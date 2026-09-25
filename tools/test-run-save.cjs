@@ -35,6 +35,30 @@ const room = (element='hydrogen', ligand=null, lesson='first') => {
     let restored; try { restored=restoreRun(saved); } finally { Math.random=random; }
     assert(restored, `${el}/${ligand} restores`); assert.deepEqual(Object.keys(restored).sort(),Object.keys(g).sort(), "All engine fields restored"); assert.deepEqual(saveRun(restored), saved);
   }
+  // Reopen a stationary hut without spending an action or renewing the first visit.
+  for (const visits of [1, 2]) {
+    const h=room('helium','fractional');h.playerPos={...h.layout.hut};h.hutVisitsThisGrid=visits;
+    const turn=h.turn, discount=h.hutDiscount;
+    h.openHut();assert(h.atHut);h.leaveHut();h.openHut();
+    assert.equal(h.hutVisitsThisGrid,visits);assert.equal(h.hutDiscount,discount);assert.equal(h.turn,turn);
+    assert(!h.usedAbilityThisTurn && !h.movedThisTurn);
+    h.leaveHut();h.playerPos={x:-1,y:-1};h.openHut();assert(!h.atHut);
+  }
+  // Every affordable evolution preserves the paid remainder, with a two-photon floor.
+  for (const ligand of [null,'fractional']) for (const kills of [0,1,2,3,8]) for (const photons of [0,1,2,3,4,5]) {
+    const h=room('hydrogen',ligand);h.atHut=true;h.hutVisitsThisGrid=1;h.stageKills=kills;h.photons=photons;
+    const price=h.hutPrice('evolve');if(photons<price) continue;
+    h.buy('evolve');assert.equal(h.currentElement,'helium');assert.equal(h.photons,Math.max(2,photons-price));
+  }
+  // Forge + throw works before or after moving, including across a reload.
+  for (const moved of [false,true]) {
+    let c=room('carbon');c.photons=5;c.movedThisTurn=moved;
+    const turn=c.turn;c.activateAbility(3);
+    assert.equal(c.turn,turn);assert.equal(c.photons,2);assert(!c.usedAbilityThisTurn);assert(c.heldSpear);
+    c=restoreRun(saveRun(c));assert(c);c.beginThrow();assert(c.aiming);
+    c.previewAim('right');c.confirmAim();assert.equal(c.photons,2);assert.equal(c.heldSpear,null);
+    assert.equal(c.turn,turn+(moved?1:0));if(!moved) assert(c.usedAbilityThisTurn);
+  }
   let g=room('hydrogen'); g.activateAbility(1); g.previewAim('right');
   let restored=restoreRun(saveRun(g)); assert(restored.aiming); assert.equal(restored.aimDirection,'right');
   restored.confirmAim(); assert.equal(restored.enemies[0].tetherTurnsLeft,3);

@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import { PhotonFlight } from '../components/PhotonFlight';
+import React, { useEffect, useState, useRef } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { AbilityBar } from '../components/AbilityBar';
 import { TutorialCoach } from '../components/TutorialCoach';
@@ -17,6 +18,10 @@ import { lessonCopy } from '@/game/tutorial';
 import { useGameStore } from '@/store/gameStore';
 
 export function GameScreen() {
+  const root=useRef<View>(null), counter=useRef<Text>(null);
+  const serial=useRef(0);
+  const [flights,setFlights]=useState<Array<{id:number;from:{x:number;y:number};to:{x:number;y:number}}>>([]);
+  const collect=(x:number,y:number)=>root.current?.measureInWindow((rx,ry)=>counter.current?.measureInWindow((cx,cy,w,h)=>setFlights(old=>[...old.slice(-8),{id:serial.current++,from:{x:x-rx,y:y-ry},to:{x:cx-rx+w/2,y:cy-ry+h/2}}])));
   const state = useGameStore();
   const { game: canonical, tick, pendingMove, confirmPendingMove, cancelPendingMove, pause, tutorial, frame, finishPlayback } = state;
   const [details, setDetails] = useState(false);
@@ -27,7 +32,7 @@ export function GameScreen() {
   const game = frame?.game ?? canonical;
   const landscape = width > height;
   const complete = tutorial?.complete;
-  return <View style={styles.root}>
+  return <View ref={root} collapsable={false} style={styles.root}>
     <View style={styles.header}>
       {state.saveWarning && <Text style={{ color: theme.red, fontSize: 12 }}>{state.saveWarning}</Text>}
       <View style={styles.row}>
@@ -35,12 +40,13 @@ export function GameScreen() {
         <Pressable accessibilityRole="button" style={styles.nav} onPress={() => setDetails(true)}><Text style={styles.text}>Details</Text></Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="Pause" style={styles.nav} onPress={pause}><Text style={styles.text}>Ⅱ</Text></Pressable>
       </View>
-      <Text style={styles.readings}>♥ {game.elementHealth}/{game.maxHealth}   ◇ {game.shieldPoints}   🔆 {game.photons}/5   Grid {game.depth} · T{game.turn}{game.turnsLeft !== null ? ` · ${game.turnsLeft} turns left` : ''}</Text>
+      <Text style={styles.readings}>♥ {game.elementHealth}/{game.maxHealth}   ◇ {game.shieldPoints}   <Text ref={counter}>🔆 {game.photons}/5</Text>   Grid {game.depth} · {game.hutPrice('evolve') === null ? 'Final element' : `Evolve ${game.hutPrice('evolve')} 🔆`}{game.turnsLeft !== null ? ` · ${game.turnsLeft} turns left` : ''}</Text>
+      {!tutorial && <Text style={styles.small}>{game.hutPrice('evolve')===null ? 'Goal: reach the hatch to win.' : game.photons>=game.hutPrice('evolve')! ? 'Evolution ready — enter the green hut.' : `Collect ${game.hutPrice('evolve')!-game.photons} more photons${game.isNoble ? '' : ', or lower the price with kills'}. Evolve at the green hut.`}</Text>}
       {game.ligand && <Text style={styles.small}>⬢ {LIGANDS[game.ligand].name}{game.exothermicActive ? ` · RAM ${game.ramDamage + game.damageBonus}` : ''}{game.ligand === 'supercooled' ? game.supercooledReady ? ' · save ready' : ' · save used' : ''}</Text>}
     </View>
     <View style={[styles.play, landscape && { flexDirection: 'row' }]}>
       <View style={styles.boardArea} onLayout={e => setSpace(e.nativeEvent.layout)}>
-        <Board game={game} tick={tick} compact maxHeight={space.height} maxWidth={space.width} inert={!!frame} />
+        <Board onPhotonBurst={collect} game={game} tick={tick} compact maxHeight={space.height} maxWidth={space.width} inert={!!frame} />
       </View>
       <View style={[styles.footer, !landscape && { height: Math.min(height * 0.55, tutorial ? 300 : 268) }, landscape && { width: '45%', maxWidth: 360, maxHeight: '100%' }]}>
         <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 6 }}>
@@ -53,6 +59,7 @@ export function GameScreen() {
       </View>
     </View>
     {!frame && <><HutModal game={canonical} /><InspectCard game={canonical} /><LigandFlash game={canonical} /></>}
+    {flights.map(f=><PhotonFlight key={f.id} from={f.from} to={f.to} onDone={()=>setFlights(old=>old.filter(x=>x.id!==f.id))}/>)}
     <PauseModal game={canonical} />
     <ConfirmModal visible={!!pendingMove} title="Something's there" body="You sense something dangerous on that tile. Step forward anyway?" confirmLabel="Step forward" cancelLabel="Stay put" onConfirm={confirmPendingMove} onCancel={cancelPendingMove} />
     <Modal visible={details} transparent animationType="fade" onRequestClose={() => setDetails(false)}>

@@ -1,3 +1,4 @@
+import {SoundEffects} from './src/ui/components/SoundEffects';
 import React, { useEffect } from 'react';
 import { AccessibilityInfo, AppState, Platform, StatusBar, StyleSheet } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -31,6 +32,7 @@ export default function App() {
   if (__DEV__ && Platform.OS === 'web' && typeof location !== 'undefined' && location.search === '?effects') return <EffectLabScreen />;
   return (
     <SafeAreaProvider>
+    <SoundEffects/>
     <SafeAreaView style={styles.root}>
       <StatusBar barStyle="dark-content" backgroundColor={theme.bg} />
       {screen === 'menu' && <LevelSelectScreen />}

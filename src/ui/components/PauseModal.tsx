@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { PaperButton, Rule, SectionLabel } from './Print';
 import { fonts, theme } from '../theme';
 import { ELEMENT_NAMES } from '@/game/constants';
@@ -11,7 +11,7 @@ import type { Game } from '@/game/engine';
  * replaces it and asks for confirmation.
  */
 export function PauseModal({ game }: { game: Game }) {
-  const { paused, resume, retry, toMenu, hapticsOn, toggleHaptics, tutorial, saveAndExit } = useGameStore();
+  const { soundOn, toggleSound, paused, resume, retry, toMenu, hapticsOn, toggleHaptics, tutorial, saveAndExit } = useGameStore();
   const [confirming, setConfirming] = useState<'restart' | null>(null);
 
   const close = () => { setConfirming(null); resume(); };
@@ -20,7 +20,7 @@ export function PauseModal({ game }: { game: Game }) {
   return (
     <Modal visible={paused && !game.gameOver} transparent animationType="fade" onRequestClose={close}>
       <View style={styles.backdrop}>
-        <View style={styles.card}>
+        <ScrollView style={styles.card} contentContainerStyle={{paddingBottom:12}}>
           <SectionLabel>Experiment suspended</SectionLabel>
           <Text style={styles.title}>Paused</Text>
           <Rule double style={{ marginTop: 4, marginBottom: 10 }} />
@@ -37,6 +37,7 @@ export function PauseModal({ game }: { game: Game }) {
           {confirming === null ? (
             <View style={styles.stack}>
               <PaperButton label="Resume ▸" variant="primary" onPress={close} />
+              <PaperButton label={`Sound: ${soundOn ? 'on' : 'off'}`} variant="outline" onPress={toggleSound} />
               <PaperButton label={`Haptics: ${hapticsOn ? 'on' : 'off'}`} variant="outline" onPress={toggleHaptics} />
               <PaperButton label={tutorial ? "Reset lesson" : "Restart run"} variant="outline" onPress={() => setConfirming('restart')} />
               <PaperButton label={tutorial ? "Leave tutorial" : "Save & main menu"} variant="muted" onPress={tutorial ? toMenu : saveAndExit} />
@@ -57,7 +58,7 @@ export function PauseModal({ game }: { game: Game }) {
               </View>
             </View>
           )}
-        </View>
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -66,7 +67,7 @@ export function PauseModal({ game }: { game: Game }) {
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(30,36,48,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   card: {
-    backgroundColor: theme.paper, borderWidth: 1, borderLeftWidth: 4, borderColor: theme.ink,
+    maxHeight:'90%', flexGrow:0, backgroundColor: theme.paper, borderWidth: 1, borderLeftWidth: 4, borderColor: theme.ink,
     borderLeftColor: theme.accent, padding: 20, width: '100%', maxWidth: 380,
   },
   title: { fontFamily: fonts.serif, fontSize: 24, fontWeight: '700', color: theme.ink, marginTop: 2 },

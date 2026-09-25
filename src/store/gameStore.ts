@@ -1,3 +1,4 @@
+import type { CombatMotion } from '@/game/types';
 import { create } from 'zustand';
 import { saveRun, restoreRun } from '@/game/runSave';
 import { Game } from '@/game/engine';
@@ -16,7 +17,7 @@ type Screen = 'menu' | 'store' | 'game' | 'over' | 'tutorialSetup' | 'catalogue'
 interface GameStore {
   screen: Screen;
   pendingAction: Action | null;
-  frame: { game: Game; label: string } | null;
+  frame: { game: Game; label: string; motion?: CombatMotion } | null;
   reducedMotion: boolean;
   prepareAction: (action: Action) => void;
   cancelAction: () => void;
@@ -33,6 +34,8 @@ interface GameStore {
   /** Long-press inspection card. Purely a view: it costs no turn and pauses nothing. */
   inspecting: InspectTarget | null;
   paused: boolean;
+  soundOn: boolean;
+  toggleSound: () => void;
   hapticsOn: boolean;
   /** Cross-run save. Null until the first load resolves; the UI shows defaults meanwhile. */
   profile: Profile;
@@ -66,6 +69,7 @@ interface GameStore {
   shatter: () => void;
   beginThrow: () => void;
   buy: (item: HutItem) => void;
+  openHut: () => void;
   leaveHut: () => void;
 
   inspect: (target: InspectTarget) => void;
@@ -116,14 +120,14 @@ export const useGameStore = create<GameStore>((set, get) => {
   const commit = (fn: (g: Game) => void) => {
     const g = get().game;
     if (!g || get().paused || get().frame || (get().tutorial?.complete && !g.ligandFlash)) return;
-    const frames: Array<{ game: Game; label: string }> = [];
+    const frames: Array<{ game: Game; label: string; motion?: CombatMotion }> = [];
     let effectArray = g.pendingEffects;
     let effectCount = effectArray.length;
-    const capture = (label: string) => {
+    const capture = (label: string, motion?: CombatMotion) => {
       const copy = g.fork();
       copy.pendingEffects = g.pendingEffects.slice(effectArray === g.pendingEffects ? effectCount : 0);
       effectArray = g.pendingEffects; effectCount = effectArray.length;
-      frames.push({ game: copy, label });
+      frames.push({ game: copy, label, motion });
       if (!get().reducedMotion) g.hapticCues = [];
     };
     capture('Your action');
@@ -148,7 +152,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       const frame = frames[i++];
       playCues(frame.game.hapticCues); frame.game.hapticCues = [];
       set(s => ({ frame, tick: s.tick + 1 }));
-      timer = setTimeout(advance, frame.game.pendingEffects.some(f => f.type === 'shock') ? 580 : Math.max(160, Math.min(320, 2200 / frames.length)));
+      timer = setTimeout(advance, frame.motion ? 420 : frame.game.pendingEffects.some(f => f.type === 'evolve') ? 850 : frame.game.pendingEffects.some(f => f.type === 'photon') ? 720 : frame.game.pendingEffects.some(f => f.feedback) ? 650 : frame.game.pendingEffects.some(f => f.type === 'shock') ? 580 : 300);
     };
     // Haptics are drained from snapshots once, alongside their corresponding beat.
     g.hapticCues = [];
@@ -212,6 +216,8 @@ export const useGameStore = create<GameStore>((set, get) => {
     pendingMove: null,
     inspecting: null,
     paused: false,
+    soundOn: true,
+    toggleSound: () => set(s=>({soundOn:!s.soundOn})),
     hapticsOn: true,
     profile: defaultProfile(),
     profileLoaded: false,
@@ -255,6 +261,7 @@ export const useGameStore = create<GameStore>((set, get) => {
     shatter: () => commit(g => g.shatter()),
     beginThrow: () => commit(g => g.beginThrow()),
     buy: (item) => commit(g => g.buy(item)),
+    openHut: () => commit(g => g.openHut()),
     leaveHut: () => { const g = get().game; if (g) { g.leaveHut(); checkpoint(g); settle(g); } },
 
     inspect: (target) => set({ inspecting: target }),
